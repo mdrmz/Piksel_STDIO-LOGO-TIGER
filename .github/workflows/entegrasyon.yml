@@ -22,14 +22,22 @@ jobs:
     name: sql (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      LOGO_ANALIZ_KLASOR: ${{ github.workspace }}/../LogoAnalizTest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
       - run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
-      - name: Entegrasyon testi
+      - name: Entegrasyon testi (kaynak koddan)
         run: python tests/entegrasyon.py
+      - name: Paketlenmiş uygulamayı derle
+        run: |
+          pip install pyinstaller
+          pyinstaller LogoTigerAnaliz.spec --noconfirm
+      - name: Paketlenmiş uygulama ile uçtan uca test
+        run: python tests/paket_testi.py
       - name: Kurulum günlükleri (hata olursa)
         if: failure() && runner.os == 'Windows'
         shell: pwsh

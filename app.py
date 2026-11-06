@@ -22,7 +22,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 
 from core import __version__
 from core.analiz import AbcEsik, Analiz, abc_ozet
-from core import kurulum, yz
+from core import kurulum, tanilama, yz
 from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak
 from core.logo import AktarimAyari, aktar, firmalari_tara
 
@@ -50,6 +50,7 @@ class Is:
     def yaz(self, m):
         with self.kilit:
             self.log.append(f"{dt.datetime.now():%H:%M:%S}  {m}")
+        tanilama.yaz(m)
 
     def baslat(self, hedef, sonraki_url):
         if self.calisiyor:
@@ -63,6 +64,7 @@ class Is:
                 self.sonraki = sonraki_url
             except (KaynakHatasi, kurulum.KurulumHatasi) as e:
                 self.hata = str(e)
+                tanilama.yaz(f"HATA: {e}")
             except Exception as e:  # beklenmeyen hata: ayrıntıyı log'a da yaz
                 self.hata = f"Beklenmeyen hata: {e}"
                 self.yaz(traceback.format_exc())
@@ -426,6 +428,24 @@ def indir(aid, tur):
     abort(404)
 
 
+@app.route("/tanilama")
+def tanilama_indir():
+    hedef = os.path.join(CALISMA, f"Tanilama_{dt.datetime.now():%Y%m%d_%H%M%S}.zip")
+    with IS.kilit:
+        son = list(IS.log)
+    tanilama.paket(hedef, son)
+    return send_file(hedef, as_attachment=True)
+
+
+@app.errorhandler(Exception)
+def beklenmeyen(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    tanilama.yaz("Beklenmeyen hata (sayfa):\n" + traceback.format_exc())
+    return render_template("hata.html", mesaj=f"Beklenmeyen bir hata oluştu: {e}", tanilama=True), 500
+
+
 @app.route("/sil/<aid>", methods=["POST"])
 def sil(aid):
     shutil.rmtree(_analiz_klasor(aid), ignore_errors=True)
@@ -469,6 +489,7 @@ def main():
         threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
     print(f"Logo Tiger Analiz {__version__} çalışıyor: http://127.0.0.1:{port}   (kapatmak için bu pencereyi kapatın)")
     print(f"Analiz klasörü: {CALISMA}")
+    tanilama.yaz(f"Uygulama başladı: sürüm {__version__}, port {port}")
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
 
 

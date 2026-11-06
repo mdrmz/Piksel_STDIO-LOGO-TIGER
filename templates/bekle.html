@@ -4,7 +4,9 @@
 <p class="soluk" id="alt">Bu pencereyi kapatmayın. Büyük yedeklerde geri yükleme birkaç dakika sürebilir.</p>
 <div id="hata" class="uyari" style="display:none;margin-bottom:12px"></div>
 <div class="log" id="log"></div>
-<p id="geri" style="display:none"><a class="btn ikincil" href="/">Ana sayfaya dön</a></p>
+<p id="geri" style="display:none"><a class="btn ikincil" href="/">Ana sayfaya dön</a>
+  <a class="btn ikincil" href="/tanilama">Tanılama paketini indir</a>
+  <span class="kucuk soluk">Sorunu bildirirken bu paketi gönderin; müşteri verisi içermez.</span></p>
 <script>
 async function yokla() {
   const r = await fetch('/durum'); const d = await r.json();

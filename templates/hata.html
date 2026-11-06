@@ -3,4 +3,6 @@
 <h1>Bir sorun var</h1>
 <div class="uyari" style="margin:12px 0">{{ mesaj }}</div>
 <a class="btn ikincil" href="javascript:history.back()">Geri dön</a>
+{% if tanilama %}<a class="btn ikincil" href="/tanilama">Tanılama paketini indir</a>
+<p class="kucuk soluk">Sorunu bildirirken bu paketi gönderin; müşteri verisi içermez.</p>{% endif %}
 {% endblock %}

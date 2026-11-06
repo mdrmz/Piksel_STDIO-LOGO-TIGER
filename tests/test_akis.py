@@ -221,3 +221,32 @@ def test_mcp_protokol(tmp_path, monkeypatch):
     kotu = mcp_sunucu.isle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
                             "params": {"name": "sql_sorgula", "arguments": {"sql": "DROP TABLE dim_cari"}}})
     assert kotu["result"]["isError"]
+
+
+def test_tanilama_paketi_musteri_verisi_icermez(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import io
+    import zipfile
+    import app as A
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(300):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01", "02"], "sadece_faturali": "1"}); bekle()
+    assert "DEMO YAPI MARKET" in (tmp_path / "gunluk.txt").read_text(encoding="utf-8")  # yerel günlükte var
+    r = c.get("/tanilama")
+    assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.data))
+    assert {"sistem.json", "gunluk.txt", "OKUBENI.txt"} <= set(z.namelist())
+    hepsi = "".join(z.read(n).decode("utf-8") for n in z.namelist())
+    for yasak in ("DEMO YAPI", "DEMO ŞUBE", "MÜŞTERİ", "TEDARİKÇİ"):
+        assert yasak not in hepsi, yasak
+    assert '"fact_satis":' in hepsi and "Aktarım tamamlandı" in hepsi
