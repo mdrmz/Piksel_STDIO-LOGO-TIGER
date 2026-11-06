@@ -173,6 +173,9 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 | *Logo firma tabloları bulunamadı* | Yedek Logo Tiger/Go veritabanı değil, ya da sadece sistem veritabanı (`LOGODB`) yedeği alınmış. |
 | Port 5055 dolu | `LOGO_ANALIZ_PORT=5056` ortam değişkeniyle başka port kullanın. |
 
+Herhangi bir sorunda sayfanın altındaki **Tanılama paketi** bağlantısıyla bir zip indirip [Issues](../../issues)'a ekleyin.
+Paket günlükleri ve sistem bilgisini içerir; müşteri verisi, firma ve kullanıcı adları içermez.
+
 ## Kaynaktan çalıştırma ve geliştirme
 
 Python 3.11+ gerekir.
@@ -188,7 +191,9 @@ python app.py
 Ya da hazır betikler: `calistir_windows.bat`, `calistir_mac.command`, `calistir_linux.sh`.
 
 **Testler:** `pip install pytest && pytest -q tests`. Testler, uygulamanın sonuçlarını ham Logo tablolarından
-düz SQL ile hesaplanan değerlerle karşılaştırır.
+düz SQL ile hesaplanan değerlerle karşılaştırır. GitHub Actions ayrıca her değişiklikte gerçek Windows ve Linux
+makinelerde SQL Server'ı kurup `.bak` geri yükleme akışını hem kaynak koddan hem paketlenmiş programla sınar
+(`tests/entegrasyon.py`, `tests/paket_testi.py`). Sürüm geçmişi: [CHANGELOG.md](CHANGELOG.md).
 
 **Tek klasörlük paket derleme:** `pip install pyinstaller && pyinstaller LogoTigerAnaliz.spec --noconfirm`
 → `dist/LogoTigerAnaliz/`
@@ -207,6 +212,7 @@ core/rapor.py          Excel raporu ve Power BI paketi
 core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap, yönetici yorumu
 core/mcp_sunucu.py     Claude Desktop bağlantısı (MCP, `--mcp`)
 core/yzpaket.py        ChatGPT vb. için yapay zekâ paketi
+core/tanilama.py       işlem günlüğü ve tanılama paketi
 demo/                  Logo yapısında örnek veri üretici
 templates/             arayüz sayfaları
 tests/                 uçtan uca testler + gerçek Windows/SQL Server entegrasyon testi
