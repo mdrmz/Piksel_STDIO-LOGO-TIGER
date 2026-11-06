@@ -22,7 +22,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 
 from core import __version__
 from core.analiz import AbcEsik, Analiz, abc_ozet
-from core import kurulum
+from core import kurulum, yz
 from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak
 from core.logo import AktarimAyari, aktar, firmalari_tara
 
@@ -302,7 +302,103 @@ def panel(aid):
         abc=[("Ürün", abc_ozet(u, "net_tutar")), ("Müşteri", abc_ozet(m, "net_tutar")), ("Tedarikçi", abc_ozet(t, "net_tutar"))],
         urun=u.head(15), musteri=m.head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), negatif_stok=len(neg), esik=esik,
-        kaynak_acik=bool(DURUM["firmalar"]))
+        kaynak_acik=bool(DURUM["firmalar"]), yz_hazir=yz.hazir_mi(), yz_ayar=yz.ayar(),
+        yorum_html=_kayitli_yorum(klasor), gecmis=[(g["soru"], yz.md_html(g["cevap"])) for g in GECMIS.get(aid, [])])
+
+
+def _kayitli_yorum(klasor):
+    if not os.path.exists(_yorum_yolu(klasor)):
+        return None
+    with open(_yorum_yolu(klasor), encoding="utf-8") as fh:
+        return yz.md_html(re.sub(r"^<!--.*?-->\n?", "", fh.read(), flags=re.S))
+
+
+# ---------------------------------------------------------------------------- yapay zekâ
+GECMIS: dict[str, list] = {}
+
+
+def _yorum_yolu(klasor):
+    return os.path.join(klasor, "yz_yorum.md")
+
+
+@app.route("/ayarlar")
+def ayarlar():
+    a = yz.ayar()
+    from core import mcp_sunucu
+    return render_template("ayarlar.html", yz=a, anahtar_var=bool(a.get("anahtar")), saglayicilar=yz.SAGLAYICILAR,
+                           hazir=yz.hazir_mi(a), claude=mcp_sunucu.claude_durumu(), kaydedildi=request.args.get("ok"))
+
+
+@app.route("/ayarlar/yz", methods=["POST"])
+def ayarlar_yz():
+    yeni = {"saglayici": request.form.get("saglayici") or None, "anonim": bool(request.form.get("anonim")),
+            "model": (request.form.get("model") or "").strip() or None}
+    anahtar = (request.form.get("anahtar") or "").strip()
+    if anahtar:
+        yeni["anahtar"] = anahtar
+    eski = yz.ayar()
+    if yeni["saglayici"] and yeni["saglayici"] != eski.get("saglayici") and not anahtar:
+        yeni["anahtar"] = ""  # sağlayıcı değişti, eski anahtar geçersiz
+    yz.ayar_kaydet(yeni)
+    return redirect(url_for("ayarlar", ok=1))
+
+
+@app.route("/yz/test", methods=["POST"])
+def yz_test():
+    j = request.get_json(force=True)
+    a = yz.ayar()
+    sag = j.get("saglayici") or a.get("saglayici")
+    anahtar = (j.get("anahtar") or "").strip() or (a.get("anahtar") if sag == a.get("saglayici") else "")
+    if not sag or not anahtar:
+        return jsonify(ok=False, hata="Sağlayıcı ve API anahtarı gerekli.")
+    try:
+        r = yz.baglanti_test(sag, anahtar, (j.get("model") or "").strip() or None)
+    except yz.YzHatasi as e:
+        return jsonify(ok=False, hata=str(e))
+    yz.ayar_kaydet({"saglayici": sag, "anahtar": anahtar, "model": r["model"]})
+    return jsonify(ok=True, model=r["model"], modeller=r["modeller"][:200])
+
+
+@app.route("/claude/<islem>", methods=["POST"])
+def claude(islem):
+    from core import mcp_sunucu
+    try:
+        if islem == "bagla":
+            mcp_sunucu.claude_bagla()
+        elif islem == "ayir":
+            mcp_sunucu.claude_ayir()
+        else:
+            abort(404)
+    except (OSError, ValueError) as e:
+        return render_template("hata.html", mesaj=f"Claude Desktop ayarı yazılamadı: {e}")
+    return redirect(url_for("ayarlar", ok=1) + "#claude")
+
+
+@app.route("/yz/sor/<aid>", methods=["POST"])
+def yz_sor(aid):
+    klasor, bilgi, a = _analiz_ac(aid)
+    soru = (request.get_json(force=True).get("soru") or "").strip()
+    if not soru:
+        return jsonify(ok=False, hata="Bir soru yazın.")
+    try:
+        r = yz.sor(a, os.path.join(klasor, "analiz.sqlite"), bilgi, soru, GECMIS.get(aid))
+    except yz.YzHatasi as e:
+        return jsonify(ok=False, hata=str(e))
+    GECMIS.setdefault(aid, []).append({"soru": soru, "cevap": r["cevap"]})
+    return jsonify(ok=True, html=yz.md_html(r["cevap"]), sorgular=r["sorgular"], anonim=r["anonim"], model=r["model"])
+
+
+@app.route("/yz/yorum/<aid>", methods=["POST"])
+def yz_yorum(aid):
+    klasor, bilgi, a = _analiz_ac(aid)
+    try:
+        metin = yz.yonetici_yorumu(a, os.path.join(klasor, "analiz.sqlite"), bilgi)
+    except yz.YzHatasi as e:
+        return jsonify(ok=False, hata=str(e))
+    ayar_ = yz.ayar()
+    with open(_yorum_yolu(klasor), "w", encoding="utf-8") as fh:
+        fh.write(f"<!-- {ayar_.get('saglayici')} / {ayar_.get('model')} / {dt.datetime.now():%d.%m.%Y %H:%M} -->\n{metin}")
+    return jsonify(ok=True, html=yz.md_html(metin))
 
 
 @app.route("/indir/<aid>/<tur>")
@@ -313,8 +409,17 @@ def indir(aid, tur):
     ad = re.sub(r"[^\w\-]", "", ad)
     if tur == "excel":
         yol = os.path.join(klasor, f"Analiz_{ad}.xlsx")
-        excel_raporu(a, yol, bilgi.get("olu_stok_gun", 90), AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95)))
+        yorum = None
+        if os.path.exists(_yorum_yolu(klasor)):
+            with open(_yorum_yolu(klasor), encoding="utf-8") as fh:
+                yorum = fh.read()
+        excel_raporu(a, yol, bilgi.get("olu_stok_gun", 90), AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95)),
+                     yorum_md=yorum)
         return send_file(yol, as_attachment=True)
+    if tur == "yzpaket":
+        from core.yzpaket import paket_olustur
+        zip_yol = paket_olustur(a, bilgi, os.path.join(klasor, f"YZ_Paketi_{ad}.zip"), yz.ayar().get("anonim", True))
+        return send_file(zip_yol, as_attachment=True)
     if tur == "powerbi":
         zip_yol = powerbi_disa_aktar(a, os.path.join(klasor, "analiz.sqlite"), os.path.join(klasor, f"PowerBI_{ad}"))
         return send_file(zip_yol, as_attachment=True)
@@ -350,6 +455,10 @@ def yuzde(v):
 
 
 def main():
+    if "--mcp" in sys.argv:  # Claude Desktop bağlantısı: web arayüzü yerine MCP sunucusu olarak çalış
+        from core import mcp_sunucu
+        mcp_sunucu.calistir()
+        return
     for akis in (sys.stdout, sys.stderr):  # Windows konsolunda/yönlendirmede Türkçe karakterler hata vermesin
         try:
             akis.reconfigure(encoding="utf-8", errors="replace")

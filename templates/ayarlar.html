@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block baslik %}Yapay zekâ ayarları — Logo Tiger Analiz{% endblock %}
+{% block icerik %}
+<h1>Yapay zekâ</h1>
+<p class="soluk">Analizleri yapay zekâyla yorumlatmanın üç yolu var. Hangisi size uygunsa onu kullanın; hiçbiri zorunlu değil.</p>
+{% if kaydedildi %}<div class="kart" style="border-color:#BFE3C8;background:#F3FBF5;margin-bottom:14px">Kaydedildi.</div>{% endif %}
+
+<div class="izgara i3" style="margin-bottom:22px">
+  <div class="kart"><h3>1 · API anahtarı</h3><p class="kucuk soluk" style="margin:0">Program içinde "Soru sor" ve Excel'e yönetici yorumu. Gemini (ücretsiz katman), DeepSeek (çok ucuz), OpenAI, Claude.</p></div>
+  <div class="kart"><h3>2 · Claude Desktop</h3><p class="kucuk soluk" style="margin:0">Claude Pro aboneliğiniz varsa ek ücret yok: Claude, analizleri doğrudan bu programdan okur.</p></div>
+  <div class="kart"><h3>3 · Yapay zekâ paketi</h3><p class="kucuk soluk" style="margin:0">ChatGPT Plus vb. her sohbet uygulaması için: analiz panelinden zip indirip sohbete sürükleyin.</p></div>
+</div>
+
+<h2>1 · API anahtarı</h2>
+<form class="kart" method="post" action="/ayarlar/yz" id="yzform">
+  <div class="izgara i2">
+    <div>
+      <label>Sağlayıcı</label>
+      <select name="saglayici" id="saglayici">
+        {% for k, s in saglayicilar.items() %}<option value="{{ k }}" {% if yz.saglayici == k %}selected{% endif %}>{{ s.ad }}</option>{% endfor %}
+      </select>
+      <p class="kucuk soluk" id="sag-not" style="margin:6px 0 0"></p>
+      <label>API anahtarı {% if anahtar_var %}<span class="soluk">(kayıtlı · değiştirmek için yenisini yazın)</span>{% endif %}</label>
+      <input type="password" name="anahtar" id="anahtar" autocomplete="off" placeholder="{% if anahtar_var %}••••••••••••{% endif %}">
+      <p class="kucuk" style="margin:6px 0 0"><a id="anahtar-link" href="#" target="_blank">Anahtar nereden alınır?</a></p>
+    </div>
+    <div>
+      <label>Model <span class="soluk">(boş bırakın; test ederken uygun olan seçilir)</span></label>
+      <input type="text" name="model" id="model" value="{{ yz.model or '' }}" list="modeller">
+      <datalist id="modeller"></datalist>
+      <label style="color:var(--yazi);font-size:14px;margin-top:14px"><input type="checkbox" name="anonim" value="1" {% if yz.anonim %}checked{% endif %}>
+        Cari ve firma adlarını gizle <span class="soluk">(önerilen, KVKK)</span></label>
+      <p class="kucuk soluk" style="margin:2px 0 0 22px">Yapay zekâ "Cari-0012" gibi takma adlar görür; cevaplar size gerçek adlarla gösterilir. Eşleme bilgisayarınızdan çıkmaz.</p>
+    </div>
+  </div>
+  <p style="margin:16px 0 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button type="button" class="btn" id="test">Bağlantıyı test et ve kaydet</button>
+    <button class="btn ikincil">Sadece kaydet</button>
+    <span id="test-sonuc" class="kucuk"></span>
+  </p>
+  {% if hazir %}<p class="kucuk" style="margin:10px 0 0;color:#1E6B2F">Hazır: {{ saglayicilar[yz.saglayici].ad }} · {{ yz.model }}</p>{% endif %}
+</form>
+
+<h2 id="claude">2 · Claude Desktop (Claude Pro aboneliği)</h2>
+<div class="kart">
+  {% if claude.bagli %}
+    <p style="margin:0 0 10px"><span class="rozet rA">✓</span> <b>Bağlı.</b> Claude Desktop'ı tamamen kapatıp yeniden açın; sohbette araçlar simgesinde <b>logo-tiger-analiz</b> görünür.</p>
+    <p class="kucuk soluk">Örnek: "Logo Tiger Analiz'deki son analize göre geçen yıla göre en çok düşen 5 müşteri kim, ne yapmalıyım?"</p>
+    <form method="post" action="/claude/ayir" style="margin-top:10px"><button class="btn kucuk sil">Bağlantıyı kaldır</button></form>
+  {% else %}
+    <p style="margin:0 0 10px">{% if claude.kurulu %}Claude Desktop bu bilgisayarda bulundu.{% else %}Claude Desktop bulunamadı; önce <a href="https://claude.ai/download" target="_blank">indirip kurun</a> ve giriş yapın.{% endif %}
+      Düğmeye basınca program kendini Claude Desktop'a bağlar (ayar dosyası yedeklenir).</p>
+    <form method="post" action="/claude/bagla"><button class="btn">Claude Desktop'a bağla</button></form>
+  {% endif %}
+  <p class="kucuk soluk" style="margin:10px 0 0">Ayar dosyası: <code>{{ claude.yol }}</code>. Anonimleştirme ayarı burada da geçerlidir.</p>
+</div>
+
+<h2>3 · Yapay zekâ paketi (ChatGPT Plus ve diğerleri)</h2>
+<div class="kart"><p style="margin:0">ChatGPT Plus aboneliği başka programlara bağlanmaya izin vermediği için en pratik yol bu: analiz panelindeki
+  <b>Yapay zekâ paketi</b> düğmesi özet, tablolar ve hazır bir ilk mesaj içeren bir zip indirir. ChatGPT, Claude veya Gemini'de yeni sohbet açıp
+  dosyaları sürükleyin, ilk mesajı yapıştırın.</p></div>
+
+<script>
+const SAG = {{ saglayicilar|tojson }};
+const sel = document.getElementById('saglayici');
+function sagGuncelle() {
+  const s = SAG[sel.value]; document.getElementById('sag-not').textContent = s.not;
+  document.getElementById('anahtar-link').href = s.anahtar_sayfa;
+}
+sel.onchange = () => { sagGuncelle(); document.getElementById('model').value = ''; };
+sagGuncelle();
+document.getElementById('test').onclick = async () => {
+  const out = document.getElementById('test-sonuc');
+  out.style.color = ''; out.textContent = 'Deneniyor…';
+  try {
+    const r = await fetch('/yz/test', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      saglayici: sel.value, anahtar: document.getElementById('anahtar').value, model: document.getElementById('model').value})});
+    const d = await r.json();
+    if (!d.ok) { out.style.color = '#9B1C1C'; out.textContent = d.hata; return; }
+    document.getElementById('model').value = d.model;
+    document.getElementById('modeller').innerHTML = d.modeller.map(m => `<option value="${m}">`).join('');
+    out.style.color = '#1E6B2F'; out.textContent = `Çalışıyor ✓ Model: ${d.model}. Kaydedildi.`;
+    document.getElementById('anahtar').value = '';
+  } catch (e) { out.style.color = '#9B1C1C'; out.textContent = 'Bağlantı hatası: ' + e; }
+};
+</script>
+{% endblock %}

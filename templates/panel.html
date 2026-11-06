@@ -1,5 +1,40 @@
 {% extends "base.html" %}
-{% block baslik %}{{ bilgi.firma }} {{ bilgi.firma_ad }} — Logo Tiger Analiz{% endblock %}
+{% block baslik %}{{ bilgi.firma }} {{ bilgi.firma_ad }} — Logo Tiger Analiz<script>
+const AID = "{{ aid }}";
+function kacir(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+async function sor(soru) {
+  const kutu = document.getElementById('sohbet'), btn = document.getElementById('sor-btn');
+  kutu.insertAdjacentHTML('beforeend', `<div class="soru">${kacir(soru)}</div><div class="yz-cevap bekliyor">Düşünüyor…</div>`);
+  const hedef = kutu.lastElementChild; btn.disabled = true;
+  try {
+    const r = await fetch('/yz/sor/' + AID, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({soru})});
+    const d = await r.json();
+    hedef.classList.remove('bekliyor');
+    if (!d.ok) { hedef.innerHTML = `<p style="color:#9B1C1C">${kacir(d.hata)}</p>`; return; }
+    let ek = '';
+    if (d.sorgular.length) ek = `<details style="margin-top:6px"><summary>${d.sorgular.length} veri sorgusu kullanıldı</summary>` +
+      d.sorgular.map(q => `<pre style="white-space:pre-wrap;font-size:12px;background:#F6F7F9;padding:8px;border-radius:6px">${kacir(q.sql)}\n→ ${kacir(q.sonuc_ozet)}</pre>`).join('') + '</details>';
+    hedef.innerHTML = d.html + ek;
+  } catch (e) { hedef.innerHTML = `<p style="color:#9B1C1C">Bağlantı hatası: ${kacir(String(e))}</p>`; }
+  finally { btn.disabled = false; }
+}
+const f = document.getElementById('sor-form');
+if (f) {
+  f.onsubmit = e => { e.preventDefault(); const t = document.getElementById('soru'); const q = t.value.trim(); if (!q) return; t.value = ''; sor(q); };
+  document.getElementById('soru').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); f.requestSubmit(); } });
+  document.querySelectorAll('button.hazir').forEach(b => b.onclick = () => sor(b.textContent));
+}
+const yb = document.getElementById('yorum-btn');
+if (yb) yb.onclick = async () => {
+  const dur = document.getElementById('yorum-durum'); yb.disabled = true; dur.textContent = 'Yazılıyor… (30–60 sn)';
+  try {
+    const r = await fetch('/yz/yorum/' + AID, {method:'POST'}); const d = await r.json();
+    if (!d.ok) { dur.textContent = d.hata; dur.style.color = '#9B1C1C'; return; }
+    document.getElementById('yorum').innerHTML = d.html; dur.textContent = 'Excel raporuna eklendi.'; yb.textContent = 'Yeniden oluştur';
+  } finally { yb.disabled = false; }
+};
+</script>
+{% endblock %}
 {% block icerik %}
 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
   <div>
@@ -9,6 +44,7 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a class="btn" href="/indir/{{ aid }}/excel">Excel raporu</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/powerbi">Power BI paketi</a>
+    <a class="btn ikincil" href="/indir/{{ aid }}/yzpaket" title="ChatGPT, Claude veya Gemini sohbetine sürükleyin">Yapay zekâ paketi</a>
     {% if kaynak_acik %}<a class="btn ikincil" href="/firmalar">Başka firma</a>{% endif %}
   </div>
 </div>
@@ -26,6 +62,37 @@
 
 {% if negatif_stok %}
 <div class="uyari" style="margin-top:16px">{{ negatif_stok }} malzemede stok bakiyesi eksi görünüyor. Bu genelde Logo'da girilmemiş alış ya da sayım fişine işaret eder; Excel raporunun "Stok Devir" sayfasında listelenir.</div>
+{% endif %}
+
+<h2>Yapay zekâya sor</h2>
+<div class="kart">
+  {% if yz_hazir %}
+  <div id="sohbet">
+    {% for soru, cevap in gecmis %}<div class="soru">{{ soru }}</div><div class="yz-cevap">{{ cevap|safe }}</div>{% endfor %}
+  </div>
+  <form id="sor-form" style="display:flex;gap:8px;align-items:flex-end;margin-top:8px">
+    <textarea id="soru" rows="2" placeholder="Örn: Geçen yıla göre en çok düşen 5 müşteri kim? · A sınıfı ürünlerden hangileri ölü stokta? · Hangi ayda neden düşüş var?"></textarea>
+    <button class="btn" id="sor-btn">Sor</button>
+  </form>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" id="hazir-sorular">
+    {% for q in ["Firmanın genel durumunu 5 maddede özetle", "Geçen yıla göre en çok düşen 5 müşteri kim, ne yapmalıyız?", "Müşteri yoğunlaşma riski var mı?", "Ölü stok için eritme planı öner"] %}
+      <button type="button" class="btn kucuk ikincil hazir">{{ q }}</button>{% endfor %}
+  </div>
+  <p class="kucuk soluk" style="margin:10px 0 0">{{ yz_ayar.saglayici }} · {{ yz_ayar.model }} ·
+    {% if yz_ayar.anonim %}cari adları gizleniyor{% else %}<span style="color:var(--uyari)">anonimleştirme kapalı</span>{% endif %} · <a href="/ayarlar">ayarlar</a></p>
+  {% else %}
+  <p style="margin:0">Yapay zekâ henüz ayarlanmadı. <a href="/ayarlar">Ayarlar</a> sayfasından ücretsiz bir Gemini anahtarı girebilir,
+    Claude Desktop'a bağlayabilir ya da yukarıdaki <b>Yapay zekâ paketi</b>ni ChatGPT'ye sürükleyebilirsiniz.</p>
+  {% endif %}
+</div>
+
+{% if yz_hazir or yorum_html %}
+<h2>Yönetici yorumu</h2>
+<div class="kart">
+  <div id="yorum" class="yz-cevap">{% if yorum_html %}{{ yorum_html|safe }}{% else %}<p class="soluk">Yapay zekâ, bu analizden yönetime sunulacak tek sayfalık bir yorum yazar. Oluşturulan yorum Excel raporuna "YZ Yorumu" sayfası olarak eklenir.</p>{% endif %}</div>
+  {% if yz_hazir %}<p style="margin:12px 0 0"><button class="btn ikincil" id="yorum-btn">{% if yorum_html %}Yeniden oluştur{% else %}Yorum oluştur{% endif %}</button>
+    <span class="kucuk soluk" id="yorum-durum"></span></p>{% endif %}
+</div>
 {% endif %}
 
 <h2>Aylık satış ve alış</h2>
@@ -100,4 +167,39 @@
 <div class="kart" style="padding:8px 12px"><table>
   {% for k, v in notlar %}<tr><td class="soluk" style="width:42%">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
 </table></div>
+<script>
+const AID = "{{ aid }}";
+function kacir(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+async function sor(soru) {
+  const kutu = document.getElementById('sohbet'), btn = document.getElementById('sor-btn');
+  kutu.insertAdjacentHTML('beforeend', `<div class="soru">${kacir(soru)}</div><div class="yz-cevap bekliyor">Düşünüyor…</div>`);
+  const hedef = kutu.lastElementChild; btn.disabled = true;
+  try {
+    const r = await fetch('/yz/sor/' + AID, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({soru})});
+    const d = await r.json();
+    hedef.classList.remove('bekliyor');
+    if (!d.ok) { hedef.innerHTML = `<p style="color:#9B1C1C">${kacir(d.hata)}</p>`; return; }
+    let ek = '';
+    if (d.sorgular.length) ek = `<details style="margin-top:6px"><summary>${d.sorgular.length} veri sorgusu kullanıldı</summary>` +
+      d.sorgular.map(q => `<pre style="white-space:pre-wrap;font-size:12px;background:#F6F7F9;padding:8px;border-radius:6px">${kacir(q.sql)}\n→ ${kacir(q.sonuc_ozet)}</pre>`).join('') + '</details>';
+    hedef.innerHTML = d.html + ek;
+  } catch (e) { hedef.innerHTML = `<p style="color:#9B1C1C">Bağlantı hatası: ${kacir(String(e))}</p>`; }
+  finally { btn.disabled = false; }
+}
+const f = document.getElementById('sor-form');
+if (f) {
+  f.onsubmit = e => { e.preventDefault(); const t = document.getElementById('soru'); const q = t.value.trim(); if (!q) return; t.value = ''; sor(q); };
+  document.getElementById('soru').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); f.requestSubmit(); } });
+  document.querySelectorAll('button.hazir').forEach(b => b.onclick = () => sor(b.textContent));
+}
+const yb = document.getElementById('yorum-btn');
+if (yb) yb.onclick = async () => {
+  const dur = document.getElementById('yorum-durum'); yb.disabled = true; dur.textContent = 'Yazılıyor… (30–60 sn)';
+  try {
+    const r = await fetch('/yz/yorum/' + AID, {method:'POST'}); const d = await r.json();
+    if (!d.ok) { dur.textContent = d.hata; dur.style.color = '#9B1C1C'; return; }
+    document.getElementById('yorum').innerHTML = d.html; dur.textContent = 'Excel raporuna eklendi.'; yb.textContent = 'Yeniden oluştur';
+  } finally { yb.disabled = false; }
+};
+</script>
 {% endblock %}

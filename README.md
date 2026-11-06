@@ -19,6 +19,7 @@ Her şey kendi bilgisayarınızda çalışır; hiçbir veri internete gönderilm
 - [SQL Server: otomatik kurulum](#sql-server-otomatik-kurulum)
 - [Analizler](#analizler)
 - [Çıktılar](#çıktılar)
+- [Yapay zekâ](#yapay-zekâ)
 - [Logo verisi nasıl yorumlanıyor](#logo-verisi-nasıl-yorumlanıyor)
 - [Güvenlik ve KVKK](#güvenlik-ve-kvkk)
 - [Sorun giderme](#sorun-giderme)
@@ -102,6 +103,35 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 Her analiz `~/LogoAnaliz/` (Windows: `C:\Users\<kullanıcı>\LogoAnaliz\`) altında saklanır;
 firmadan ayrıldıktan sonra programı açıp **Önceki analizler** listesinden tekrar açabilirsiniz.
 
+## Yapay zekâ
+
+Analizleri yapay zekâya yorumlatmanın üç yolu var (**Yapay zekâ ayarları** sayfası). Hiçbiri zorunlu değildir.
+
+| Yol | Kimin için | Ne olur |
+|---|---|---|
+| **API anahtarı** | Gemini (ücretsiz katman), DeepSeek (çok ucuz), OpenAI, Claude API | Panelde **Yapay zekâya sor** kutusu; Excel raporuna **YZ Yorumu** sayfası (yönetici yorumu). |
+| **Claude Desktop** | Claude Pro aboneliği olanlar (ek ücret yok) | Tek tıkla program Claude Desktop'a bağlanır; Claude analizleri doğrudan buradan okur ve sorgular. |
+| **Yapay zekâ paketi** | ChatGPT Plus ve diğer tüm sohbet uygulamaları | Panelden zip indirilir (özet, tablolar, hazır ilk mesaj); sohbete sürükleyip bırakılır. |
+
+![Yapay zekâya sor](docs/yz.png)
+
+- **Abonelikler hakkında:** ChatGPT Plus / Claude Pro gibi aylık abonelikler başka programlara API erişimi vermez.
+  Bu yüzden abonelik kullananlar için Claude Desktop bağlantısı ve yapay zekâ paketi var; API anahtarı ayrı ücretlendirilir.
+- **Model seçimi otomatiktir:** anahtar test edilirken sağlayıcının güncel model listesi çekilir ve uygun model seçilir;
+  bir model emekliye ayrılırsa "Bağlantıyı test et" yeterlidir.
+- **Nasıl cevaplıyor:** yapay zekâ önce analizin özetini (ABC, trend, geçen yıl karşılaştırması, ölü stok…) görür.
+  Gerekirse analiz veritabanında **salt-okur** SQL sorgusu ister; program sorguyu çalıştırıp sonucu verir (en fazla 4 tur).
+  Kullanılan sorgular cevabın altında görünür.
+
+### Gizlilik (KVKK)
+- **Anonimleştirme varsayılan olarak açıktır:** cari ve firma adları yapay zekâya `Cari-0012`, `FİRMA` gibi takma adlarla gider;
+  cevap ekranda gerçek adlarla gösterilir. Eşleme tablosu bilgisayardan çıkmaz. Aynı kural Claude Desktop bağlantısında ve
+  yapay zekâ paketinde de geçerlidir. Bu davranış testlerde, servise giden her istek taranarak doğrulanır.
+- Yapay zekâya ham fatura satırları değil, özet tablolar ve sorgu sonuçları gider.
+- API anahtarı diskte şifreli saklanır (Windows: DPAPI).
+- Sağlayıcı seçerken dikkat: Gemini'nin ücretsiz katmanında Google veriyi ürün geliştirmek için kullanabilir;
+  DeepSeek'in sunucuları Çin'dedir (yurt dışına veri aktarımı). Hassas firmalarda ücretli katman veya anonimleştirme önerilir.
+
 ## Logo verisi nasıl yorumlanıyor
 
 Ham Logo tabloları doğrudan toplandığında ciro yanlış çıkar. Program şu kuralları uygular:
@@ -174,6 +204,9 @@ core/kaynak.py         .bak geri yükleme, SQL Server ve SQLite bağlantıları
 core/logo.py           firma/dönem tarama, Logo tablolarından temiz modele aktarım
 core/analiz.py         ABC, trend, ölü stok, stok devir
 core/rapor.py          Excel raporu ve Power BI paketi
+core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap, yönetici yorumu
+core/mcp_sunucu.py     Claude Desktop bağlantısı (MCP, `--mcp`)
+core/yzpaket.py        ChatGPT vb. için yapay zekâ paketi
 demo/                  Logo yapısında örnek veri üretici
 templates/             arayüz sayfaları
 tests/                 uçtan uca testler + gerçek Windows/SQL Server entegrasyon testi

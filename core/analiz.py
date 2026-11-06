@@ -112,6 +112,31 @@ class Analiz:
         t["yillik_degisim"] = t["net_satis"] / t["gecen_yil_ayni_ay"] - 1
         return t
 
+    def donem_karsilastirma(self, seviye: str = "cari"):
+        """Bu yılın başından verideki son tarihe kadar olan satışı, geçen yılın aynı dönemiyle karşılaştırır.
+        seviye: "cari" veya "malzeme". Geçen yıla ait veri yoksa None döner."""
+        s = self.satis
+        son = s["tarih"].max()
+        bu = s[(s["tarih"].dt.year == son.year) & (s["tarih"] <= son)]
+        gecen_son = son - pd.DateOffset(years=1)
+        gecen = s[(s["tarih"].dt.year == son.year - 1) & (s["tarih"] <= gecen_son)]
+        if gecen.empty or bu.empty:
+            return None
+        anahtar = "cari_ref" if seviye == "cari" else "malzeme_ref"
+        t = (bu.groupby(anahtar)["net_tutar"].sum().rename("bu_yil").to_frame()
+             .join(gecen.groupby(anahtar)["net_tutar"].sum().rename("gecen_yil"), how="outer").fillna(0).reset_index())
+        t["fark"] = t["bu_yil"] - t["gecen_yil"]
+        t["degisim"] = np.where(t["gecen_yil"] > 0, t["bu_yil"] / t["gecen_yil"].where(t["gecen_yil"] > 0) - 1, np.nan)
+        if seviye == "cari":
+            t = t.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")
+            cols = ["cari_kod", "cari_ad", "sehir"]
+        else:
+            t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
+            cols = ["malzeme_kod", "malzeme_ad", "grup_kod"]
+        t = t.sort_values("fark").reset_index(drop=True)
+        t.attrs["donem"] = (f"{son.year}-01-01 – {son.date()}", f"{son.year - 1}-01-01 – {gecen_son.date()}")
+        return t[cols + ["bu_yil", "gecen_yil", "fark", "degisim"]]
+
     def grup_satis(self):
         s = self.satis.merge(self.malzeme[["malzeme_ref", "grup_kod"]], on="malzeme_ref", how="left")
         s["grup_kod"] = s["grup_kod"].replace("", "(grupsuz)").fillna("(grupsuz)")

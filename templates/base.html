@@ -36,10 +36,17 @@
   .sekme button.aktif { background:#fff; color:var(--yazi); border-bottom-color:#fff; font-weight:500; }
   .log { background:#0F172A; color:#D1D5DB; font:12.5px/1.6 ui-monospace, Menlo, Consolas, monospace; border-radius:8px; padding:14px; height:320px; overflow:auto; white-space:pre-wrap; }
   details summary { cursor:pointer; color:var(--mavi); font-size:13.5px; }
+  code { background:#EEF1F5; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .yz-cevap { font-size:14.5px; } .yz-cevap h3,.yz-cevap h4,.yz-cevap h5 { margin:14px 0 6px; font-size:15px; }
+  .yz-cevap table { margin:8px 0; } .yz-cevap p { margin:6px 0; } .yz-cevap ul,.yz-cevap ol { margin:6px 0; padding-left:22px; }
+  .soru { background:#EEF3FB; border-radius:8px; padding:8px 12px; margin:14px 0 6px; font-weight:500; }
+  textarea { width:100%; padding:9px 11px; border:1px solid #CBD2DC; border-radius:6px; font:inherit; resize:vertical; }
+  .bekliyor { color:var(--soluk); font-style:italic; }
 </style>
 </head>
 <body>
-<header><a class="logo" href="/">Logo Tiger Analiz</a><span class="alt">Piksel Analitik · v{{ surum }}</span></header>
+<header><a class="logo" href="/">Logo Tiger Analiz</a><span class="alt">Piksel Analitik · v{{ surum }}</span>
+  <nav style="margin-left:auto;display:flex;gap:18px;font-size:14px"><a href="/">Analizler</a><a href="/ayarlar">Yapay zekâ ayarları</a></nav></header>
 <main>{% block icerik %}{% endblock %}</main>
 </body>
 </html>

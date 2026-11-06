@@ -113,7 +113,7 @@ def _abc_sayfa(wb, f, ad, baslik, tablo: pd.DataFrame, deger="net_tutar", esik=N
     return ws
 
 
-def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None):
+def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_md: str | None = None):
     with pd.ExcelWriter(yol, engine="xlsxwriter") as xw:
         wb = xw.book
         f = _fmt(wb)
@@ -153,6 +153,28 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None):
         ws.write(r, 0, "Veri notları", f["h2"])
         for i, (k, v) in enumerate(a.veri_notlari(), start=1):
             ws.write(r + i, 0, k, f["etiket"]); ws.write(r + i, 1, str(v))
+
+        # ---- Yapay zekâ yorumu (oluşturulduysa)
+        if yorum_md:
+            import re as _re
+            ws = wb.add_worksheet("YZ Yorumu")
+            ws.set_column(0, 0, 120)
+            kaynak = _re.search(r"<!--\s*(.*?)\s*-->", yorum_md)
+            ws.write(0, 0, "Yönetici yorumu (yapay zekâ)", f["h1"])
+            ws.write(1, 0, "Yapay zekâ tarafından üretilmiştir; kararlardan önce rakamları diğer sayfalardan doğrulayın."
+                     + (f"  ·  {kaynak.group(1)}" if kaynak else ""), f["not"])
+            sarili = wb.add_format({"text_wrap": True, "valign": "top"})
+            r = 3
+            for satir in _re.sub(r"<!--.*?-->", "", yorum_md, flags=_re.S).strip().splitlines():
+                if not satir.strip():
+                    continue
+                h = _re.match(r"^#{1,4}\s+(.*)", satir)
+                if h:
+                    r += 1
+                    ws.write(r, 0, h.group(1), f["h2"])
+                else:
+                    ws.write(r, 0, _re.sub(r"\*\*(.+?)\*\*", r"\1", satir.strip()), sarili)
+                r += 1
 
         # ---- ABC sayfaları
         _abc_sayfa(wb, f, "Ürün ABC", "Ürün ABC analizi (net satış tutarına göre)", a.urun_abc(esik=esik), esik=esik)

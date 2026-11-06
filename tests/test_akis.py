@@ -135,3 +135,89 @@ def test_turkce_onarim():
     assert turkce_onar("MÜŞTERİ A.Ş.") == "MÜŞTERİ A.Ş."      # doğru metne dokunulmaz
     assert turkce_onar("ABC Ltd") == "ABC Ltd"
     assert turkce_onar(None) is None
+
+
+# ---------------------------------------------------------------------------- yapay zekâ
+def _gecici_analiz(tmp_path):
+    yol = str(tmp_path / "analiz.sqlite")
+    k = SqliteKaynak(DEMO)
+    f = next(f for f in firmalari_tara(k) if f.no == "001")
+    aktar(k, f, f.donemler, yol)
+    return yol, {"firma": "001", "firma_ad": f.ad, "donemler": f.donemler}
+
+
+def test_yz_maske_ve_sql(tmp_path):
+    from core import yz
+    yol, bilgi = _gecici_analiz(tmp_path)
+    a = Analiz(yol)
+    m = yz.Maske(a, bilgi["firma_ad"], True)
+    baglam = yz.baglam(a, bilgi, m)
+    assert "MÜŞTERİ 1" not in baglam and "DEMO YAPI" not in baglam and "Cari-0150" in baglam
+    assert m.ac(m.gizle("MÜŞTERİ 150 TİC. LTD. ŞTİ.")) == "MÜŞTERİ 150 TİC. LTD. ŞTİ."
+    # takma adla yazılan sorgu gerçek adla çalışır, sonuç yine takma adla döner
+    r = yz.sql_calistir(yol, "SELECT cari_ad FROM dim_cari WHERE cari_ad = 'Cari-0150'", m)
+    assert "Cari-0150" in r and "MÜŞTERİ" not in r and r.startswith("1 satır")
+    for kotu in ("DELETE FROM dim_cari", "SELECT 1; DROP TABLE dim_cari", "UPDATE dim_cari SET cari_ad='x'"):
+        assert yz.sql_calistir(yol, kotu, m).startswith("HATA")
+
+
+def test_yz_sor_sahte_model(tmp_path, monkeypatch):
+    from core import yz
+    yol, bilgi = _gecici_analiz(tmp_path)
+    giden = []
+
+    def sahte(sag, anahtar, model, sistem, mesajlar, azami=2500):
+        giden.append(sistem + json_dumps(mesajlar))
+        if len(mesajlar) == 1:
+            return "```sql\nSELECT c.cari_ad, SUM(net_tutar) t FROM fact_satis JOIN dim_cari c USING(cari_ref) GROUP BY 1 ORDER BY t DESC LIMIT 1\n```"
+        assert "Cari-0150" in mesajlar[-1]["content"]
+        return "En büyük müşteri **Cari-0150**."
+
+    monkeypatch.setattr(yz, "sohbet", sahte)
+    r = yz.sor(Analiz(yol), yol, bilgi, "MÜŞTERİ 150 TİC. LTD. ŞTİ. en büyük mü?",
+               a={"saglayici": "gemini", "anahtar": "x", "model": "m", "anonim": True})
+    assert r["cevap"] == "En büyük müşteri **MÜŞTERİ 150 TİC. LTD. ŞTİ.**."
+    assert len(r["sorgular"]) == 1
+    assert not any("MÜŞTERİ 1" in g or "DEMO YAPI" in g for g in giden), "gerçek ad yapay zekâya gitmemeli"
+
+
+def json_dumps(x):
+    import json
+    return json.dumps(x, ensure_ascii=False)
+
+
+def test_model_secimi():
+    from core import yz
+    assert yz.model_sec("gemini", ["gemini-2.5-pro", "gemini-3.6-flash", "gemini-3.6-flash-lite"]) == "gemini-3.6-flash"
+    assert yz.model_sec("gemini", ["gemini-flash-latest", "gemini-3.6-flash"]) == "gemini-flash-latest"
+    assert yz.model_sec("openai", ["gpt-4o", "gpt-6.1-mini", "gpt-5.4-mini"]) == "gpt-5.4-mini"  # tercih listesi önce
+    assert yz.model_sec("openai", ["gpt-4o", "gpt-6.1-mini", "gpt-7-mini"]) == "gpt-7-mini"  # yoksa en yeni
+    assert yz.model_sec("deepseek", ["deepseek-pro"]) is None
+
+
+def test_md_html():
+    from core import yz
+    h = yz.md_html("## Başlık\n- **kalın** <script>\n\n| a | b |\n|---|---|\n| 1 | 2 |")
+    assert "<h4>Başlık</h4>" in h and "<b>kalın</b>" in h and "&lt;script&gt;" in h and "<td>1</td>" in h
+
+
+def test_mcp_protokol(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import json
+    from core import mcp_sunucu
+    klasor = tmp_path / "20260101_000000_F001"
+    klasor.mkdir()
+    k = SqliteKaynak(DEMO)
+    f = next(f for f in firmalari_tara(k) if f.no == "001")
+    aktar(k, f, f.donemler, str(klasor / "analiz.sqlite"))
+    (klasor / "bilgi.json").write_text(json.dumps({"firma": "001", "firma_ad": f.ad, "donemler": f.donemler}), encoding="utf-8")
+    r = mcp_sunucu.isle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    assert r["result"]["protocolVersion"] == "2025-06-18" and "tools" in r["result"]["capabilities"]
+    assert mcp_sunucu.isle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    araclar = mcp_sunucu.isle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+    assert {t["name"] for t in araclar} == {"analizleri_listele", "analiz_ozeti", "sql_sorgula"}
+    oz = mcp_sunucu.isle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "analiz_ozeti", "arguments": {}}})
+    assert not oz["result"]["isError"] and "DEMO YAPI" not in oz["result"]["content"][0]["text"]
+    kotu = mcp_sunucu.isle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                            "params": {"name": "sql_sorgula", "arguments": {"sql": "DROP TABLE dim_cari"}}})
+    assert kotu["result"]["isError"]

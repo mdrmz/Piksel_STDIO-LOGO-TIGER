@@ -92,6 +92,10 @@ jobs:
             sleep 2
           done
           curl -sf http://127.0.0.1:5055/ | grep -q "Logo Tiger Analiz" || { cat app.log; exit 1; }
+          # Claude Desktop (MCP) modu: initialize'a cevap veriyor mu
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+            | "$EXE" --mcp | tee mcp.log | grep -q '"logo-tiger-analiz"' || { echo "MCP cevap vermedi"; cat mcp.log; exit 1; }
+          echo "MCP modu çalışıyor"
       - name: Paketle (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

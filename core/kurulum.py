@@ -93,24 +93,31 @@ def _sifre_ac(s: str) -> str:
     return _dpapi(ham, False).decode() if tur == "dpapi" else ham.decode()
 
 
+SIFRELI = (("sql", "sifre"), ("yz", "anahtar"))  # diske şifreli yazılan alanlar
+
+
 def ayar_oku() -> dict:
     try:
         with open(_ayar_yolu(), encoding="utf-8") as fh:
             a = json.load(fh)
     except (OSError, ValueError):
         return {}
-    if a.get("sql", {}).get("sifre"):
-        try:
-            a["sql"]["sifre"] = _sifre_ac(a["sql"]["sifre"])
-        except Exception:
-            a.pop("sql", None)
+    for bolum, alan in SIFRELI:
+        if (a.get(bolum) or {}).get(alan):
+            try:
+                a[bolum][alan] = _sifre_ac(a[bolum][alan])
+            except Exception:
+                a[bolum].pop(alan, None)
+                if bolum == "sql":
+                    a.pop("sql", None)
     return a
 
 
 def ayar_yaz(a: dict):
     a = json.loads(json.dumps(a))
-    if a.get("sql", {}).get("sifre"):
-        a["sql"]["sifre"] = _sifre_sakla(a["sql"]["sifre"])
+    for bolum, alan in SIFRELI:
+        if (a.get(bolum) or {}).get(alan):
+            a[bolum][alan] = _sifre_sakla(a[bolum][alan])
     yol = _ayar_yolu()
     with open(yol, "w", encoding="utf-8") as fh:
         json.dump(a, fh, ensure_ascii=False, indent=1)
