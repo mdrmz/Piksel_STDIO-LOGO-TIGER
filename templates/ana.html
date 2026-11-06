@@ -18,7 +18,13 @@
 </div>
 {% elif sql.docker == 'yok' %}
 <div class="uyari" style="margin-bottom:16px">
-  <b>Docker gerekli.</b> macOS/Linux'ta SQL Server, Docker içinde çalışır. <a href="{{ docker_sayfa }}" target="_blank">Docker Desktop'ı indirip</a> kurun ve açın; gerisini program yapar.
+  <b>Docker gerekli.</b> macOS/Linux'ta SQL Server, Docker içinde çalışır; Docker'ı bir kez kurun, gerisini program yapar.
+  {% if sql.platform == 'mac' %}<a href="{{ docker_sayfa }}" target="_blank">Docker Desktop'ı indirin</a>, kurun ve açın.
+  {% else %}<div style="margin-top:6px">Terminalde: <code>curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER</code> — sonra oturumu kapatıp açın.</div>{% endif %}
+</div>
+{% elif sql.docker == 'izin_yok' %}
+<div class="uyari" style="margin-bottom:16px">
+  <b>Docker kurulu ama bu kullanıcının yetkisi yok.</b> Terminalde: <code>sudo usermod -aG docker $USER</code> — sonra oturumu kapatıp açın.
 </div>
 {% else %}
 <div class="uyari" style="margin-bottom:16px;display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap">

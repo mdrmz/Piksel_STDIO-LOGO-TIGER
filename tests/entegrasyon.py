@@ -1,13 +1,13 @@
 """
-Gerçek Windows entegrasyon testi (GitHub Actions windows-latest üzerinde çalışır).
+Gerçek entegrasyon testi (GitHub Actions: windows-latest ve ubuntu-latest + Docker).
 
-1. Programın kendi kurulum kodu ile SQL Server Express'i kurar (core.kurulum.hazirla).
+1. Programın kendi kurulum kodu ile SQL Server'ı hazırlar (Windows: Express kurulumu, Linux: Docker konteyneri).
 2. Demo verisinden Logo yapısında bir veritabanı oluşturur (varchar + Turkish_CI_AS, Logo'daki gibi).
 3. BACKUP DATABASE ile gerçek bir .bak dosyası alır, veritabanını siler.
 4. Uygulamanın arayüz akışıyla .bak'ı "programın SQL Server'ı" seçeneğiyle açar, firma 001'i aktarır.
 5. Sonuçları SQLite demo üzerinden yapılan aynı analizle karşılaştırır; geçici veritabanının silindiğini doğrular.
 
-Çalıştırma: python demo/demo_db_olustur.py demo/logo_demo.sqlite && python tests/entegrasyon_windows.py
+Çalıştırma: python demo/demo_db_olustur.py demo/logo_demo.sqlite && python tests/entegrasyon.py
 """
 import os
 import shutil
@@ -79,14 +79,21 @@ def main():
 
     adim("3) Logo yapısında test veritabanı ve .bak yedeği")
     logo_veritabani_olustur(sql)
-    sunucu_bak = os.path.join(sql["yedek_klasoru"], "LOGOTEST_kaynak.bak")
+    yerel_bak = os.path.join(sql["yedek_klasoru"], "LOGOTEST_kaynak.bak")
+    sk = sql.get("sunucu_yedek_klasoru") or sql["yedek_klasoru"]
+    sunucu_tarafi = sk.rstrip("/\\") + ("/" if sk.startswith("/") else "\\") + "LOGOTEST_kaynak.bak"
     con = baglan(sql)
     cur = con.cursor()
-    cur.execute(f"BACKUP DATABASE [LOGOTEST] TO DISK = %s WITH INIT, FORMAT", (sunucu_bak,))
+    cur.execute("BACKUP DATABASE [LOGOTEST] TO DISK = %s WITH INIT, FORMAT", (sunucu_tarafi,))
     while cur.nextset():
         pass
     cur.execute("DROP DATABASE [LOGOTEST]")
     con.close()
+    if sql["tur"] == "docker":  # konteynerin yazdığı dosyayı kullanıcının okuyabileceği hale getir
+        import subprocess
+        subprocess.run(["docker", "exec", "-u", "0", kurulum.KONTEYNER, "chmod", "644",
+                        "/var/opt/mssql/backup/LOGOTEST_kaynak.bak"], check=True)
+    sunucu_bak = yerel_bak
     kullanici_bak = os.path.join(tempfile.gettempdir(), "Masaustu", "TIGER_TEST.bak")
     os.makedirs(os.path.dirname(kullanici_bak), exist_ok=True)
     shutil.move(sunucu_bak, kullanici_bak)

@@ -1,7 +1,7 @@
 # Logo Tiger Analiz
 
 [![Son sürüm](https://img.shields.io/github/v/release/mdrmz/Piksel_STDIO-LOGO-TIGER?label=s%C3%BCr%C3%BCm)](../../releases/latest)
-[![Windows entegrasyon testi](https://github.com/mdrmz/Piksel_STDIO-LOGO-TIGER/actions/workflows/entegrasyon.yml/badge.svg)](../../actions/workflows/entegrasyon.yml)
+[![Entegrasyon testi (Windows + Linux)](https://github.com/mdrmz/Piksel_STDIO-LOGO-TIGER/actions/workflows/entegrasyon.yml/badge.svg)](../../actions/workflows/entegrasyon.yml)
 [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-blue)](LICENSE)
 
 **Logo Tiger yedeğinden (`.bak`) dakikalar içinde satış, stok, müşteri ve tedarikçi analizi.**
@@ -64,14 +64,15 @@ Her şey kendi bilgisayarınızda çalışır; hiçbir veri internete gönderilm
 | Sistem | Program ne yapar |
 |---|---|
 | **Windows** | Microsoft'un ücretsiz **SQL Server 2022 Express** sürümünü indirir ve `LOGOANALIZ` adıyla sessizce kurar. Sizden sadece Windows'un yönetici izni penceresine "Evet" demeniz istenir. Rastgele üretilen `sa` şifresi Windows DPAPI ile şifrelenip `LogoAnaliz\ayarlar.json`'da saklanır. Port `14330`, yedek klasörü `C:\ProgramData\LogoAnaliz\yedek`. Firmanın kendi Logo SQL Server'ına dokunulmaz. |
-| **macOS / Linux** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) kuruluysa SQL Server konteynerini (`logo-analiz-mssql`) kendisi oluşturur ve başlatır. Docker yoksa indirme bağlantısını gösterir. Apple Silicon Mac'lerde Docker ayarlarında *Use Rosetta for x86_64/amd64 emulation* açık olmalı. |
+| **macOS** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) kuruluysa SQL Server konteynerini (`logo-analiz-mssql`) kendisi oluşturur ve başlatır. Docker ayarlarında *Use Rosetta for x86_64/amd64 emulation* açık olmalı. |
+| **Linux** (64 bit Intel/AMD) | Docker kuruluysa konteyneri kendisi oluşturur ve başlatır. Docker'ı bir kez kurmak için: `curl -fsSL https://get.docker.com \| sudo sh && sudo usermod -aG docker $USER`, sonra oturumu kapatıp açın. Power BI Desktop Linux'ta yoktur; Excel raporu LibreOffice'te grafikleriyle açılır. |
 
 İsterseniz *Bu bilgisayardaki başka bir SQL Server* seçeneğiyle mevcut bir sunucuyu (ör. Logo'nun kendi örneği, kullanıcı `sa`)
 da kullanabilirsiniz; program bilgisayardaki örnekleri listeler.
 
 Bu akış her kod değişikliğinde GitHub Actions'ta **gerçek bir Windows makinesinde** baştan sona test edilir:
 SQL Server Express programın kendi koduyla kurulur, Logo yapısında bir veritabanından `.bak` alınır, uygulama bu yedeği
-geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır ([tests/entegrasyon_windows.py](tests/entegrasyon_windows.py)).
+geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır ([tests/entegrasyon.py](tests/entegrasyon.py)); Linux/Docker yolu da aynı testle Ubuntu üzerinde doğrulanır.
 
 > Yedek, kurulu SQL Server'dan **daha yeni** bir sürümle alınmışsa geri yüklenemez. Program SQL Server 2022 kurar;
 > Logo'nun kullandığı 2012–2022 sürümlerinin yedeklerini açar.

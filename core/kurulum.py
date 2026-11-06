@@ -372,32 +372,53 @@ def _docker(*arg, zaman_asimi=120):
 
 
 def docker_durumu():
+    """yok | izin_yok | kapali | calisiyor"""
     if not shutil.which("docker"):
         return "yok"
     try:
-        return "calisiyor" if _docker("info", zaman_asimi=20).returncode == 0 else "kapali"
+        r = _docker("info", zaman_asimi=20)
     except Exception:
         return "kapali"
+    if r.returncode == 0:
+        return "calisiyor"
+    if "permission denied" in (r.stderr or "").lower():
+        return "izin_yok"
+    return "kapali"
+
+
+LINUX_DOCKER_KURULUM = ("curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER  "
+                        "(sonra oturumu kapatıp açın)")
 
 
 def docker_hazirla(ilerleme=print) -> dict:
+    if not MAC and platform.machine().lower() in ("aarch64", "arm64"):
+        raise KurulumHatasi("SQL Server'ın Linux sürümü sadece 64 bit Intel/AMD işlemcilerde çalışır (bu bilgisayar ARM). "
+                            "Bir Windows bilgisayar ya da Apple Silicon Mac kullanın.")
     d = docker_durumu()
     if d == "yok":
-        raise KurulumHatasi(f"Bu bilgisayarda Docker yok. SQL Server için Docker Desktop'ı kurup açın: {DOCKER_SAYFA} "
-                            f"— sonra tekrar deneyin.")
+        if MAC:
+            raise KurulumHatasi(f"Bu bilgisayarda Docker yok. Docker Desktop'ı kurup açın: {DOCKER_SAYFA} — sonra tekrar deneyin.")
+        raise KurulumHatasi(f"Bu bilgisayarda Docker yok. Terminalde bir kez şunu çalıştırın: {LINUX_DOCKER_KURULUM}")
+    if d == "izin_yok":
+        raise KurulumHatasi("Docker kurulu ama bu kullanıcının Docker'ı kullanma yetkisi yok. Terminalde: "
+                            "sudo usermod -aG docker $USER  — sonra oturumu kapatıp açın (ya da bilgisayarı yeniden başlatın).")
     if d == "kapali":
         if MAC:
             ilerleme("Docker Desktop açılıyor…")
             subprocess.run(["open", "-a", "Docker"], capture_output=True)
         else:
-            ilerleme("Docker servisi kapalı; başlatmayı deniyorum…")
+            ilerleme("Docker servisi kapalı; başlatılıyor (şifre sorulabilir)…")
+            if shutil.which("pkexec") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                subprocess.run(["pkexec", "systemctl", "start", "docker"], capture_output=True, timeout=300)
             subprocess.run(["systemctl", "--user", "start", "docker-desktop"], capture_output=True)
-        for _ in range(60):
+        for _ in range(40):
             time.sleep(3)
             if docker_durumu() == "calisiyor":
                 break
         else:
-            raise KurulumHatasi("Docker çalışmıyor. Docker Desktop'ı açıp tekrar deneyin.")
+            if MAC:
+                raise KurulumHatasi("Docker çalışmıyor. Docker Desktop'ı açıp tekrar deneyin.")
+            raise KurulumHatasi("Docker servisi çalışmıyor. Terminalde: sudo systemctl enable --now docker  — sonra tekrar deneyin.")
 
     a = ayar_oku()
     sql = a.get("sql") if a.get("sql", {}).get("tur") == "docker" else None

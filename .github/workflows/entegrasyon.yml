@@ -1,7 +1,7 @@
-name: Windows entegrasyon testi
+name: Entegrasyon testi
 
-# Gerçek Windows'ta: programın kendi kodu SQL Server Express'i kurar, Logo yapısında veritabanından
-# .bak alınır, uygulama bu yedeği geri yükleyip analiz eder ve sonuçlar karşılaştırılır.
+# Gerçek makinede: programın kendi kodu SQL Server'ı hazırlar (Windows: Express kurulumu, Linux: Docker konteyneri),
+# Logo yapısında veritabanından .bak alınır, uygulama bu yedeği geri yükleyip analiz eder ve sonuçlar karşılaştırılır.
 on:
   push:
     branches: [main]
@@ -14,8 +14,13 @@ env:
   PYTHONIOENCODING: "utf-8"
 
 jobs:
-  windows-sql:
-    runs-on: windows-latest
+  sql:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    name: sql (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -24,10 +29,13 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
       - name: Entegrasyon testi
-        run: python tests/entegrasyon_windows.py
+        run: python tests/entegrasyon.py
       - name: Kurulum günlükleri (hata olursa)
-        if: failure()
+        if: failure() && runner.os == 'Windows'
         shell: pwsh
         run: |
           Get-ChildItem "C:\Program Files\Microsoft SQL Server\*\Setup Bootstrap\Log" -Recurse -Filter Summary*.txt -ErrorAction SilentlyContinue |
             ForEach-Object { Write-Host "---- $($_.FullName)"; Get-Content $_.FullName -Tail 60 }
+      - name: Konteyner günlükleri (hata olursa)
+        if: failure() && runner.os == 'Linux'
+        run: docker logs logo-analiz-mssql 2>&1 | tail -80 || true
