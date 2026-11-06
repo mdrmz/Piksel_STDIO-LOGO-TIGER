@@ -1,9 +1,13 @@
 name: Derle ve yayınla
 
-# "v0.1.0" gibi bir etiket gönderildiğinde Windows, macOS ve Linux paketlerini derler
-# ve GitHub Releases sayfasına ekler. Elle çalıştırma (workflow_dispatch) sadece derler, paketleri artifact olarak bırakır.
+# Sürüm yayınlama: core/__init__.py içindeki __version__ artırılıp main'e gönderildiğinde
+# testleri çalıştırır, Windows / macOS / Linux paketlerini derler, "v<sürüm>" etiketini ve Release'i oluşturur.
+# O sürümün Release'i zaten varsa sadece test + derleme yapılır (paketler Actions artifact'i olarak kalır).
+# Elle de çalıştırılabilir (Actions > Derle ve yayınla > Run workflow) ya da "v*" etiketi gönderilerek tetiklenebilir.
 on:
   push:
+    branches: [main]
+    paths: ["core/__init__.py", ".github/workflows/release.yml", "LogoTigerAnaliz.spec", "requirements.txt"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -11,7 +15,30 @@ permissions:
   contents: write
 
 jobs:
+  surum:
+    runs-on: ubuntu-latest
+    outputs:
+      etiket: ${{ steps.s.outputs.etiket }}
+      yayinla: ${{ steps.s.outputs.yayinla }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: s
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SURUM=$(python3 -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('core/__init__.py').read())[1])")
+          ETIKET="v$SURUM"
+          echo "etiket=$ETIKET" >> "$GITHUB_OUTPUT"
+          if gh release view "$ETIKET" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$ETIKET zaten yayınlanmış; sadece derlenecek."
+            echo "yayinla=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$ETIKET yayınlanacak."
+            echo "yayinla=true" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: surum
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,14 +106,18 @@ jobs:
           path: ${{ matrix.paket }}
 
   yayinla:
-    needs: derle
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [surum, derle]
+    if: needs.surum.outputs.yayinla == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with: { path: paketler, merge-multiple: true }
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.surum.outputs.etiket }}
+          name: Logo Tiger Analiz ${{ needs.surum.outputs.etiket }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: paketler/*
           generate_release_notes: true
           body: |

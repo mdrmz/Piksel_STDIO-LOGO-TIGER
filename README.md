@@ -153,11 +153,8 @@ düz SQL ile hesaplanan değerlerle karşılaştırır.
 **Tek klasörlük paket derleme:** `pip install pyinstaller && pyinstaller LogoTigerAnaliz.spec --noconfirm`
 → `dist/LogoTigerAnaliz/`
 
-**Yeni sürüm yayınlama:** `core/__init__.py` içindeki sürümü artırın, sonra
-```bash
-git tag v0.1.1 && git push origin v0.1.1
-```
-GitHub Actions testleri çalıştırır, üç sistem için paketleri derler ve Releases sayfasına ekler.
+**Yeni sürüm yayınlama:** `core/__init__.py` içindeki `__version__` değerini artırıp (ör. `"0.1.1"`) `main`'e gönderin.
+GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0.1.1` etiketini ve Release'i kendisi oluşturur.
 
 **Klasör yapısı**
 ```
