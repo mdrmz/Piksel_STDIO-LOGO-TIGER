@@ -1,0 +1,25 @@
+# Mac / Linux için yerel SQL Server (Logo .bak dosyalarını geri yüklemek için)
+#   1) Docker Desktop'ı kurun ve açın
+#   2) Bu klasörde:  docker compose up -d
+#   3) .bak dosyalarını ./yedekler klasörüne koyun
+#   4) Uygulamada: Sunucu = localhost, Kullanıcı = sa, Şifre = aşağıdaki,
+#      Gelişmiş > "SQL Server'ın dosyayı gördüğü yol" = /var/opt/mssql/backup/DOSYA.bak
+# Apple Silicon (M1/M2/M3) Mac'lerde Docker Desktop ayarlarında
+# "Use Rosetta for x86_64/amd64 emulation" açık olmalı.
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: logo-analiz-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "LogoAnaliz!2026"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./yedekler:/var/opt/mssql/backup
+      - mssql-veri:/var/opt/mssql
+    restart: unless-stopped
+volumes:
+  mssql-veri:

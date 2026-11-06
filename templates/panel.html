@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block baslik %}{{ bilgi.firma }} {{ bilgi.firma_ad }} — Logo Tiger Analiz{% endblock %}
+{% block icerik %}
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>{{ bilgi.firma }} · {{ bilgi.firma_ad or 'Firma' }}</h1>
+    <div class="soluk">{{ o.tarih_bas }} – {{ o.tarih_bit }} · dönemler {{ bilgi.donemler|join(', ') }} · kaynak {{ bilgi.kaynak }}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a class="btn" href="/indir/{{ aid }}/excel">Excel raporu</a>
+    <a class="btn ikincil" href="/indir/{{ aid }}/powerbi">Power BI paketi</a>
+    {% if kaynak_acik %}<a class="btn ikincil" href="/firmalar">Başka firma</a>{% endif %}
+  </div>
+</div>
+
+<div class="izgara i4" style="margin-top:20px">
+  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.net_satis|tl }} ₺</div>
+    <div class="kucuk soluk">iade {{ o.iade_tutar|tl }} ₺ · {{ o.iade_orani|yuzde }}</div></div>
+  <div class="kart kpi"><div class="ad">Fatura sayısı</div><div class="deger">{{ o.fatura_sayisi|tl }}</div>
+    <div class="kucuk soluk">ortalama {{ o.ortalama_fatura|tl }} ₺</div></div>
+  <div class="kart kpi"><div class="ad">Müşteri / ürün</div><div class="deger">{{ o.musteri_sayisi|tl }} / {{ o.urun_sayisi|tl }}</div>
+    <div class="kucuk soluk">satış yapılan</div></div>
+  <div class="kart kpi"><div class="ad">Net alış (KDV hariç)</div><div class="deger">{{ o.net_alis|tl }} ₺</div>
+    <div class="kucuk soluk">{{ o.tedarikci_sayisi }} tedarikçi</div></div>
+</div>
+
+{% if negatif_stok %}
+<div class="uyari" style="margin-top:16px">{{ negatif_stok }} malzemede stok bakiyesi eksi görünüyor. Bu genelde Logo'da girilmemiş alış ya da sayım fişine işaret eder; Excel raporunun "Stok Devir" sayfasında listelenir.</div>
+{% endif %}
+
+<h2>Aylık satış ve alış</h2>
+<div class="kart"><img src="data:image/png;base64,{{ grafik }}" style="width:100%;height:auto" alt="Aylık net satış ve alış grafiği"></div>
+
+<h2>ABC dağılımı</h2>
+<div class="izgara i3">
+  {% for ad, oz in abc %}
+  <div class="kart">
+    <h3>{{ ad }}</h3>
+    <table>
+      <tr><th>Sınıf</th><th class="s">Kalem</th><th class="s">Kalem payı</th><th class="s">Tutar payı</th></tr>
+      {% for r in oz.itertuples() %}
+      <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td><td class="s">{{ r.kalem_sayisi|int }}</td>
+          <td class="s">{{ r.kalem_payi|yuzde }}</td><td class="s">{{ r.deger_payi|yuzde }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endfor %}
+</div>
+<p class="kucuk soluk">A: tutarın ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı. Tüm liste Excel raporunda.</p>
+
+<div class="izgara i2">
+  <div>
+    <h2>İlk 15 ürün</h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th></th><th>Malzeme</th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
+      {% for r in urun.itertuples() %}
+      <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
+          <td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }} · {{ r.grup_kod }}</div></td>
+          <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+  <div>
+    <h2>İlk 15 müşteri</h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th></th><th>Müşteri</th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
+      {% for r in musteri.itertuples() %}
+      <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
+          <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }} · son alım {{ r.son_alim }}</div></td>
+          <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+</div>
+
+<div class="izgara i2">
+  <div>
+    <h2>Ölü stok <span class="soluk kucuk">({{ olu_say }} kalem · ~{{ olu_deger|tl }} ₺)</span></h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th>Malzeme</th><th class="s">Stok</th><th class="s">Son satış</th><th class="s">Tahmini değer</th></tr>
+      {% for r in olu.itertuples() %}
+      <tr><td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }}</div></td><td class="s">{{ r.stok_miktar|tl }}</td>
+          <td class="s">{{ r.son_satis if r.son_satis == r.son_satis and r.son_satis else 'hiç satılmadı' }}</td>
+          <td class="s">{{ r.tahmini_deger|tl }}</td></tr>
+      {% else %}<tr><td colspan="4" class="soluk">Ölü stok yok.</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  <div>
+    <h2>Malzeme grubuna göre satış</h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th>Grup</th><th class="s">Net tutar</th><th class="s">Pay</th></tr>
+      {% for r in grup.itertuples() %}
+      <tr><td>{{ r.grup_kod }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+</div>
+
+<h2>Veri notları</h2>
+<div class="kart" style="padding:8px 12px"><table>
+  {% for k, v in notlar %}<tr><td class="soluk" style="width:42%">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

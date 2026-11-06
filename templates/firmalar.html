@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block icerik %}
+<h1>Firma ve dönem seçimi</h1>
+<p class="soluk">Kaynak: {{ kaynak_ad }} · {{ firmalar|length }} Logo firması bulundu.</p>
+
+<form method="post" action="/aktar">
+<div class="kart">
+  <table>
+    <tr><th style="width:40px"></th><th>Firma</th><th>Dönemler</th></tr>
+    {% for f in firmalar %}
+    <tr>
+      <td><input type="radio" name="firma" value="{{ f.no }}" {% if loop.first %}checked{% endif %}></td>
+      <td><b>{{ f.no }}</b> {{ f.ad or '' }}</td>
+      <td>{% for p in f.donemler %}
+        <label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 0 0;color:var(--yazi);font-size:14px">
+          <input type="checkbox" name="donem_{{ f.no }}" value="{{ p }}" checked> {{ p }}</label>
+      {% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Ayarlar</h2>
+<div class="kart izgara i3">
+  <div>
+    <label style="color:var(--yazi);font-size:14px"><input type="checkbox" name="sadece_faturali" value="1" checked> Sadece faturalanmış satışlar</label>
+    <p class="kucuk soluk" style="margin:2px 0 0">Kapalıysa faturası kesilmemiş irsaliyeler de satışa sayılır.</p>
+    <label style="color:var(--yazi);font-size:14px"><input type="checkbox" name="hizmetler" value="1"> Hizmet satırlarını dahil et</label>
+  </div>
+  <div>
+    <label>ABC sınırları (kümülatif tutar payı, %)</label>
+    <div class="izgara i2" style="gap:10px">
+      <div><input type="number" name="abc_a" value="80" min="1" max="99"><span class="kucuk soluk">A ≤</span></div>
+      <div><input type="number" name="abc_b" value="95" min="2" max="100"><span class="kucuk soluk">B ≤</span></div>
+    </div>
+  </div>
+  <div>
+    <label>Ölü stok: kaç gündür satılmayan</label>
+    <input type="number" name="olu_gun" value="90" min="7">
+    <label style="color:var(--yazi);font-size:14px;margin-top:12px"><input type="checkbox" name="baska_firma" value="1"> Sonra başka firmayı da analiz edeceğim (yedeği açık tut)</label>
+  </div>
+</div>
+<p style="margin-top:18px"><button class="btn">Verileri aktar ve analiz et</button></p>
+</form>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block icerik %}
+<h1 id="baslik">Çalışıyor…</h1>
+<p class="soluk" id="alt">Bu pencereyi kapatmayın. Büyük yedeklerde geri yükleme birkaç dakika sürebilir.</p>
+<div id="hata" class="uyari" style="display:none;margin-bottom:12px"></div>
+<div class="log" id="log"></div>
+<p id="geri" style="display:none"><a class="btn ikincil" href="/">Ana sayfaya dön</a></p>
+<script>
+async function yokla() {
+  const r = await fetch('/durum'); const d = await r.json();
+  const log = document.getElementById('log');
+  log.textContent = d.log.join('\n'); log.scrollTop = log.scrollHeight;
+  if (d.hata) {
+    document.getElementById('baslik').textContent = 'İşlem tamamlanamadı';
+    document.getElementById('alt').style.display = 'none';
+    const h = document.getElementById('hata'); h.textContent = d.hata; h.style.display = '';
+    document.getElementById('geri').style.display = ''; return;
+  }
+  if (!d.calisiyor && d.sonraki) { location.href = d.sonraki; return; }
+  setTimeout(yokla, 700);
+}
+yokla();
+</script>
+{% endblock %}

@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# demo veritabanı derlemede / ilk çalıştırmada üretilir
+demo/logo_demo.sqlite
+
+# müşteri verisi asla repoya girmesin
+*.bak
+*.mdf
+*.ldf
+yedekler/*
+!yedekler/.gitkeep
+LogoAnaliz/
+*.xlsx
+PowerBI_*/
+PowerBI_*.zip
+
+.DS_Store
+Thumbs.db

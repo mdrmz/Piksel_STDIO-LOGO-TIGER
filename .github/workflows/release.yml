@@ -1,0 +1,101 @@
+name: Derle ve yayınla
+
+# "v0.1.0" gibi bir etiket gönderildiğinde Windows, macOS ve Linux paketlerini derler
+# ve GitHub Releases sayfasına ekler. Elle çalıştırma (workflow_dispatch) sadece derler, paketleri artifact olarak bırakır.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pytest
+      - run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
+      - run: pytest -q tests
+
+  derle:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            paket: LogoTigerAnaliz-windows-x64.zip
+          - os: macos-latest
+            paket: LogoTigerAnaliz-macos-apple-silicon.zip
+          - os: ubuntu-latest
+            paket: LogoTigerAnaliz-linux-x64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Paketler
+        run: pip install -r requirements.txt pyinstaller
+      - name: Demo veri
+        run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
+      - name: PyInstaller
+        run: pyinstaller LogoTigerAnaliz.spec --noconfirm
+      - name: Duman testi (uygulama açılıyor mu)
+        shell: bash
+        env:
+          LOGO_ANALIZ_TARAYICI_ACMA: "1"
+          LOGO_ANALIZ_KLASOR: ${{ runner.temp }}/la
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then EXE=dist/LogoTigerAnaliz/LogoTigerAnaliz.exe; else EXE=dist/LogoTigerAnaliz/LogoTigerAnaliz; fi
+          "$EXE" > app.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:5055/ > /dev/null; then echo "Uygulama ayakta"; break; fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:5055/ | grep -q "Logo Tiger Analiz" || { cat app.log; exit 1; }
+      - name: Paketle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item README.md dist/LogoTigerAnaliz/
+          Compress-Archive -Path dist/LogoTigerAnaliz -DestinationPath ${{ matrix.paket }}
+      - name: Paketle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cp README.md docker-compose.yml dist/LogoTigerAnaliz/
+          cd dist && ditto -c -k --keepParent LogoTigerAnaliz ../${{ matrix.paket }}
+      - name: Paketle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cp README.md docker-compose.yml dist/LogoTigerAnaliz/
+          tar -C dist -czf ${{ matrix.paket }} LogoTigerAnaliz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.paket }}
+          path: ${{ matrix.paket }}
+
+  yayinla:
+    needs: derle
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: paketler, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: paketler/*
+          generate_release_notes: true
+          body: |
+            ## İndirme
+            | Sistem | Dosya |
+            |---|---|
+            | Windows 10/11 (64 bit) | `LogoTigerAnaliz-windows-x64.zip` |
+            | macOS (M1/M2/M3/M4) | `LogoTigerAnaliz-macos-apple-silicon.zip` |
+            | Linux (64 bit) | `LogoTigerAnaliz-linux-x64.tar.gz` |
+
+            Zip'i açın, `LogoTigerAnaliz` klasöründeki programı çalıştırın; tarayıcı kendiliğinden açılır.
+            `.bak` yedeğini geri yüklemek için bilgisayarda SQL Server gerekir — ayrıntılar README'de.

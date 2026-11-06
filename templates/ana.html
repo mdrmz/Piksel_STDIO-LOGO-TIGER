@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block icerik %}
+<h1>Yeni analiz</h1>
+<p class="soluk">Logo yedeğini (.bak) seçin. Program yedeği bu bilgisayardaki SQL Server'a geçici olarak geri yükler, Logo tablolarını okur ve iş bitince geçici veritabanını siler.</p>
+
+<div class="kart">
+  <div class="sekme" style="margin-top:-6px;margin-bottom:12px">
+    <button type="button" class="aktif" data-s="bak">Yedek dosyası (.bak)</button>
+    <button type="button" data-s="mssql">Canlı SQL Server veritabanı</button>
+    {% if demo_var %}<button type="button" data-s="demo">Demo veri</button>{% endif %}
+  </div>
+
+  <form id="f-bak" method="post" action="/kaynak" enctype="multipart/form-data">
+    <input type="hidden" name="tur" value="bak">
+    <div class="izgara i2">
+      <div>
+        <label>Yedek dosyası</label>
+        <input type="file" name="bak_dosya" accept=".bak">
+        <label>…ya da dosyanın tam yolu (büyük yedeklerde daha hızlı)</label>
+        <input type="text" name="bak_yol" placeholder="C:\Yedekler\TIGER.bak">
+      </div>
+      <div>
+        <label>Yerel SQL Server</label>
+        <input type="text" name="sunucu" value="{{ varsayilan_sunucu }}">
+        <div class="izgara i2" style="gap:10px">
+          <div><label>Kullanıcı (Logo kurulumlarında genelde sa)</label><input type="text" name="kullanici" value="sa"></div>
+          <div><label>Şifre</label><input type="password" name="sifre"></div>
+        </div>
+        <details style="margin-top:10px"><summary>Gelişmiş (Mac / Docker)</summary>
+          <label>Port</label><input type="number" name="port" value="1433">
+          <label>SQL Server'ın dosyayı gördüğü yol (Docker'da ör. /var/opt/mssql/backup/TIGER.bak)</label>
+          <input type="text" name="sunucudaki_yol">
+        </details>
+      </div>
+    </div>
+    <p style="margin:16px 0 0"><button class="btn">Yedeği aç ve firmaları tara</button></p>
+  </form>
+
+  <form id="f-mssql" method="post" action="/kaynak" style="display:none">
+    <input type="hidden" name="tur" value="mssql">
+    <div class="izgara i2">
+      <div><label>Sunucu</label><input type="text" name="sunucu" placeholder="SUNUCU\SQLEXPRESS veya 192.168.1.10"></div>
+      <div><label>Veritabanı</label><input type="text" name="veritabani" placeholder="TIGER"></div>
+      <div><label>Kullanıcı</label><input type="text" name="kullanici" placeholder="salt-okur kullanıcı önerilir"></div>
+      <div><label>Şifre</label><input type="password" name="sifre"></div>
+      <div><label>Port</label><input type="number" name="port" value="1433"></div>
+    </div>
+    <p class="kucuk soluk">Sadece SELECT sorgusu çalıştırılır; Logo verisine yazılmaz.</p>
+    <p><button class="btn">Bağlan ve firmaları tara</button></p>
+  </form>
+
+  {% if demo_var %}
+  <form id="f-demo" method="post" action="/kaynak" style="display:none">
+    <input type="hidden" name="tur" value="demo">
+    <p class="soluk">Logo tablo yapısında üretilmiş örnek veri: 2 firma, 3 dönem. Programı denemek ve müşteriye göstermek için.</p>
+    <p><button class="btn">Demo veriyle başla</button></p>
+  </form>
+  {% endif %}
+</div>
+
+<h2>Önceki analizler</h2>
+{% if analizler %}
+<div class="kart" style="padding:6px 12px">
+<table>
+  <tr><th>Firma</th><th>Dönemler</th><th>Tarih aralığı</th><th>Kaynak</th><th>Oluşturma</th><th></th></tr>
+  {% for a in analizler %}
+  <tr>
+    <td><b>{{ a.firma }}</b> {{ a.firma_ad }}</td><td>{{ a.donemler|join(', ') }}</td>
+    <td>{{ a.tarih_bas }} – {{ a.tarih_bit }}</td><td class="soluk">{{ a.kaynak }}</td><td class="soluk">{{ a.olusturma }}</td>
+    <td style="text-align:right;white-space:nowrap">
+      <a class="btn kucuk" href="/panel/{{ a.id }}">Aç</a>
+      <form method="post" action="/sil/{{ a.id }}" style="display:inline" onsubmit="return confirm('Bu analiz ve dosyaları silinsin mi?')">
+        <button class="btn kucuk sil">Sil</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}<p class="soluk">Henüz analiz yok.</p>{% endif %}
+<p class="kucuk soluk">Analizler bu klasörde tutulur: {{ calisma }}</p>
+
+<script>
+document.querySelectorAll('.sekme button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.sekme button').forEach(x => x.classList.toggle('aktif', x === b));
+  ['bak','mssql','demo'].forEach(s => { const f = document.getElementById('f-' + s); if (f) f.style.display = (s === b.dataset.s) ? '' : 'none'; });
+});
+</script>
+{% endblock %}
