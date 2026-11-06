@@ -22,6 +22,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 
 from core import __version__
 from core.analiz import AbcEsik, Analiz, abc_ozet
+from core import kurulum
 from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak
 from core.logo import AktarimAyari, aktar, firmalari_tara
 
@@ -60,7 +61,7 @@ class Is:
             try:
                 hedef()
                 self.sonraki = sonraki_url
-            except KaynakHatasi as e:
+            except (KaynakHatasi, kurulum.KurulumHatasi) as e:
                 self.hata = str(e)
             except Exception as e:  # beklenmeyen hata: ayrıntıyı log'a da yaz
                 self.hata = f"Beklenmeyen hata: {e}"
@@ -110,8 +111,22 @@ def _analiz_klasor(aid):
 # ---------------------------------------------------------------------------- sayfalar
 @app.route("/")
 def ana():
-    return render_template("ana.html", analizler=_analizler(), demo_var=os.path.exists(DEMO_DB),
-                           calisma=CALISMA, varsayilan_sunucu=os.environ.get("LOGO_ANALIZ_SQL", r"localhost\SQLEXPRESS"))
+    try:
+        sql_durum = kurulum.durum()
+    except Exception as e:  # durum okunamazsa arayüz yine açılsın
+        sql_durum = {"platform": "?", "hazir": False, "sql": None, "ornekler": [], "docker": None, "hata": str(e)}
+    return render_template("ana.html", analizler=_analizler(), demo_var=os.path.exists(DEMO_DB), calisma=CALISMA,
+                           sql=sql_durum, docker_sayfa=kurulum.DOCKER_SAYFA,
+                           varsayilan_sunucu=os.environ.get("LOGO_ANALIZ_SQL", r"localhost\SQLEXPRESS"))
+
+
+@app.route("/sql-hazirla", methods=["POST"])
+def sql_hazirla():
+    def is_():
+        kurulum.hazirla(IS.yaz)
+        IS.yaz("Hazır. Artık Logo yedeğini seçebilirsiniz.")
+    IS.baslat(is_, url_for("ana"))
+    return redirect(url_for("bekle"))
 
 
 @app.route("/kaynak", methods=["POST"])
@@ -133,6 +148,7 @@ def kaynak_ac():
             yuklendi = True
         if not yol or not os.path.exists(yol):
             return render_template("hata.html", mesaj="Yedek dosyası bulunamadı. Dosyayı seçin ya da tam yolunu yazın.")
+        otomatik = request.form.get("sql_kaynak", "otomatik") == "otomatik"
         ayar = dict(sunucu=request.form.get("sunucu") or r"localhost\SQLEXPRESS",
                     kullanici=request.form.get("kullanici", ""), sifre=request.form.get("sifre", ""),
                     port=int(request.form.get("port") or 1433),
@@ -141,7 +157,14 @@ def kaynak_ac():
         def is_():
             IS.yaz(f"Yedek: {os.path.basename(yol)} ({os.path.getsize(yol) / 1024 ** 2:,.0f} MB)")
             try:
-                k = BakKaynak(yol, ilerleme=IS.yaz, **ayar)
+                if otomatik:
+                    IS.yaz("Programın SQL Server'ı kontrol ediliyor…")
+                    sql = kurulum.hazirla(IS.yaz)
+                    k = BakKaynak(yol, sunucu=sql["sunucu"], port=sql["port"], kullanici=sql["kullanici"],
+                                  sifre=sql["sifre"], yedek_klasoru=sql.get("yedek_klasoru"),
+                                  sunucu_yedek_klasoru=sql.get("sunucu_yedek_klasoru"), ilerleme=IS.yaz)
+                else:
+                    k = BakKaynak(yol, ilerleme=IS.yaz, **ayar)
             finally:
                 if yuklendi:  # tarayıcıdan yüklenen kopya artık gereksiz (veritabanı geri yüklendi)
                     try:

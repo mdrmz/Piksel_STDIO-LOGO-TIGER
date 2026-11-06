@@ -134,7 +134,7 @@ class BakKaynak(MssqlKaynak):
 
     def __init__(self, bak_yolu: str, sunucu: str = r"localhost\SQLEXPRESS", kullanici: str = "", sifre: str = "",
                  port: int = 1433, yedek_klasoru: str | None = None, sunucudaki_yol: str | None = None,
-                 isi_bitince_sil: bool = True, ilerleme=None):
+                 sunucu_yedek_klasoru: str | None = None, isi_bitince_sil: bool = True, ilerleme=None):
         """
         sunucudaki_yol: SQL Server dosyayı farklı bir yoldan görüyorsa (ör. Docker'da /var/opt/mssql/backup/x.bak)
                         o yol. Verilmezse bak_yolu (veya kopyalandığı yer) kullanılır.
@@ -155,7 +155,8 @@ class BakKaynak(MssqlKaynak):
                 f"Yerel SQL Server'a bağlanılamadı ({sunucu}). SQL Server Express kurulu ve çalışıyor mu? "
                 f"Ayrıntı: {str(e)[:300]}") from e
 
-        yol = sunucudaki_yol or self._dosyayi_hazirla(bak_yolu, yedek_klasoru)
+        self._kopya = None
+        yol = sunucudaki_yol or self._dosyayi_hazirla(bak_yolu, yedek_klasoru, sunucu_yedek_klasoru)
         self._geri_yukle(yol)
         kw["database"] = self.gecici_db
         kw.pop("autocommit")
@@ -176,18 +177,33 @@ class BakKaynak(MssqlKaynak):
             pass
         return sonuc
 
-    def _dosyayi_hazirla(self, bak_yolu, yedek_klasoru):
+    def _dosyayi_hazirla(self, bak_yolu, yedek_klasoru, sunucu_yedek_klasoru):
+        """SQL Server servisi .bak'ı kendi hesabıyla okur; dosyayı onun erişebildiği bir klasöre kopyalar.
+        Dönen değer: SQL Server'ın dosyayı gördüğü yol."""
         import shutil
-        if yedek_klasoru is None:
+        adaylar = []
+        if yedek_klasoru:
+            adaylar.append((yedek_klasoru, sunucu_yedek_klasoru or yedek_klasoru))
+        else:
             r = self._sorgu_m("SELECT CAST(SERVERPROPERTY('InstanceDefaultBackupPath') AS nvarchar(4000)) AS p")
-            yedek_klasoru = r[0]["p"] if r and r[0]["p"] else None
-        if yedek_klasoru and os.path.isdir(yedek_klasoru):
-            hedef = os.path.join(yedek_klasoru, f"{self.gecici_db}.bak")
-            self._ilerleme("Yedek dosyası SQL Server klasörüne kopyalanıyor…")
-            shutil.copyfile(bak_yolu, hedef)
+            if r and r[0]["p"]:
+                adaylar.append((r[0]["p"], r[0]["p"]))
+            if os.name == "nt":
+                ortak = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "LogoAnaliz", "yedek")
+                adaylar.append((ortak, ortak))
+        ad = f"{self.gecici_db}.bak"
+        for yerel, sunucu_tarafi in adaylar:
+            if not os.path.isdir(yerel):
+                continue
+            hedef = os.path.join(yerel, ad)
+            try:
+                self._ilerleme("Yedek dosyası SQL Server'ın okuyabileceği klasöre kopyalanıyor…")
+                shutil.copyfile(bak_yolu, hedef)
+            except OSError:
+                continue  # yazma izni yok; sıradaki klasörü dene
             self._kopya = hedef
-            return hedef
-        self._kopya = None
+            ayrac = "/" if sunucu_tarafi.startswith("/") else "\\"
+            return sunucu_tarafi.rstrip("/\\") + ayrac + ad
         return os.path.abspath(bak_yolu)
 
     def _geri_yukle(self, yol):

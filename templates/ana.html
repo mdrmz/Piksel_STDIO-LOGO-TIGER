@@ -1,7 +1,31 @@
 {% extends "base.html" %}
 {% block icerik %}
 <h1>Yeni analiz</h1>
-<p class="soluk">Logo yedeğini (.bak) seçin. Program yedeği bu bilgisayardaki SQL Server'a geçici olarak geri yükler, Logo tablolarını okur ve iş bitince geçici veritabanını siler.</p>
+<p class="soluk">Logo yedeğini (.bak) seçin ve başlatın. Gerekli SQL Server bu bilgisayarda yoksa program onu kendisi kurar.</p>
+
+{% if sql.hazir %}
+<div class="kart" style="display:flex;align-items:center;gap:12px;margin-bottom:16px;border-color:#BFE3C8;background:#F3FBF5">
+  <span class="rozet rA">✓</span>
+  <div><b>SQL Server hazır.</b> <span class="soluk kucuk">
+    {% if sql.sql.tur == 'docker' %}Docker konteyneri · {% else %}Programın SQL Server'ı ({{ sql.sql.ornek }}) · {% endif %}{{ sql.sql.sunucu }}:{{ sql.sql.port }}</span></div>
+</div>
+{% elif sql.platform == 'windows' %}
+<div class="uyari" style="margin-bottom:16px;display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap">
+  <div><b>{% if sql.sql %}Programın SQL Server'ı şu an çalışmıyor.{% else %}Programın SQL Server'ı henüz kurulmadı.{% endif %}</b>
+    Yedeği açtığınızda otomatik {% if sql.sql %}başlatılır{% else %}kurulur (internet gerekir, 5–10 dk, Windows yönetici izni ister){% endif %}.
+    İsterseniz şimdi hazırlayın.</div>
+  <form method="post" action="/sql-hazirla"><button class="btn kucuk">Şimdi hazırla</button></form>
+</div>
+{% elif sql.docker == 'yok' %}
+<div class="uyari" style="margin-bottom:16px">
+  <b>Docker gerekli.</b> macOS/Linux'ta SQL Server, Docker içinde çalışır. <a href="{{ docker_sayfa }}" target="_blank">Docker Desktop'ı indirip</a> kurun ve açın; gerisini program yapar.
+</div>
+{% else %}
+<div class="uyari" style="margin-bottom:16px;display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap">
+  <div><b>SQL Server konteyneri {% if sql.sql %}çalışmıyor{% else %}henüz oluşturulmadı{% endif %}.</b> Yedeği açtığınızda otomatik başlatılır (ilk seferde imaj indirilir).</div>
+  <form method="post" action="/sql-hazirla"><button class="btn kucuk">Şimdi hazırla</button></form>
+</div>
+{% endif %}
 
 <div class="kart">
   <div class="sekme" style="margin-top:-6px;margin-bottom:12px">
@@ -20,20 +44,27 @@
         <input type="text" name="bak_yol" placeholder="C:\Yedekler\TIGER.bak">
       </div>
       <div>
-        <label>Yerel SQL Server</label>
-        <input type="text" name="sunucu" value="{{ varsayilan_sunucu }}">
-        <div class="izgara i2" style="gap:10px">
-          <div><label>Kullanıcı (Logo kurulumlarında genelde sa)</label><input type="text" name="kullanici" value="sa"></div>
-          <div><label>Şifre</label><input type="password" name="sifre"></div>
+        <label>Yedek hangi SQL Server ile açılsın?</label>
+        <label style="color:var(--yazi);font-size:14px;margin-top:6px"><input type="radio" name="sql_kaynak" value="otomatik" checked> Programın kendi SQL Server'ı <span class="soluk">(önerilen, otomatik)</span></label>
+        <label style="color:var(--yazi);font-size:14px"><input type="radio" name="sql_kaynak" value="elle"> Bu bilgisayardaki başka bir SQL Server</label>
+        <div id="elle" style="display:none;border-left:2px solid var(--cizgi);padding-left:12px;margin-top:6px">
+          {% if sql.ornekler %}<div class="kucuk soluk" style="margin-top:6px">Bulunanlar:
+            {% for o in sql.ornekler %}<a href="#" class="ornek" data-s="{{ o.sunucu }}">{{ o.sunucu }}</a>{% if not o.calisiyor %} (kapalı){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+          <label>Sunucu</label>
+          <input type="text" name="sunucu" id="sunucu" value="{{ varsayilan_sunucu }}">
+          <div class="izgara i2" style="gap:10px">
+            <div><label>Kullanıcı (Logo'da genelde sa)</label><input type="text" name="kullanici" value="sa"></div>
+            <div><label>Şifre</label><input type="password" name="sifre"></div>
+          </div>
+          <details style="margin-top:10px"><summary>Gelişmiş</summary>
+            <label>Port</label><input type="number" name="port" value="1433">
+            <label>SQL Server'ın dosyayı gördüğü yol (Docker'da ör. /var/opt/mssql/backup/TIGER.bak)</label>
+            <input type="text" name="sunucudaki_yol">
+          </details>
         </div>
-        <details style="margin-top:10px"><summary>Gelişmiş (Mac / Docker)</summary>
-          <label>Port</label><input type="number" name="port" value="1433">
-          <label>SQL Server'ın dosyayı gördüğü yol (Docker'da ör. /var/opt/mssql/backup/TIGER.bak)</label>
-          <input type="text" name="sunucudaki_yol">
-        </details>
       </div>
     </div>
-    <p style="margin:16px 0 0"><button class="btn">Yedeği aç ve firmaları tara</button></p>
+    <p style="margin:16px 0 0"><button class="btn">Başlat</button></p>
   </form>
 
   <form id="f-mssql" method="post" action="/kaynak" style="display:none">
@@ -84,5 +115,9 @@ document.querySelectorAll('.sekme button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.sekme button').forEach(x => x.classList.toggle('aktif', x === b));
   ['bak','mssql','demo'].forEach(s => { const f = document.getElementById('f-' + s); if (f) f.style.display = (s === b.dataset.s) ? '' : 'none'; });
 });
+document.querySelectorAll('input[name=sql_kaynak]').forEach(r => r.onchange = () => {
+  document.getElementById('elle').style.display = document.querySelector('input[name=sql_kaynak]:checked').value === 'elle' ? '' : 'none';
+});
+document.querySelectorAll('a.ornek').forEach(a => a.onclick = e => { e.preventDefault(); document.getElementById('sunucu').value = a.dataset.s; });
 </script>
 {% endblock %}

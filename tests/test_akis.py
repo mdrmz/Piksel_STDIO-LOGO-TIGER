@@ -108,3 +108,21 @@ def test_arayuz_ve_raporlar(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.data[:2] == b"PK"
     r = c.get(f"/indir/{aid}/powerbi")
     assert r.status_code == 200 and r.data[:2] == b"PK"
+
+
+def test_kurulum_ayar_sifre_saklama(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    from core import kurulum
+    kurulum.ayar_yaz({"sql": {"tur": "docker", "sunucu": "127.0.0.1", "port": 14333, "kullanici": "sa", "sifre": "Gizli!123"}})
+    ham = (tmp_path / "ayarlar.json").read_text(encoding="utf-8")
+    assert "Gizli!123" not in ham          # düz metin olarak yazılmamalı
+    assert kurulum.ayar_oku()["sql"]["sifre"] == "Gizli!123"
+
+
+def test_kurulum_sifre_karmasikligi():
+    from core import kurulum
+    for _ in range(50):
+        s = kurulum._guclu_sifre()
+        assert len(s) == 24 and any(c.isupper() for c in s) and any(c.islower() for c in s)
+        assert any(c.isdigit() for c in s) and any(c in "!#%+-=" for c in s)
+        assert not any(c in s for c in "\"'`$;&|<> ")  # ini / komut satırı için güvenli

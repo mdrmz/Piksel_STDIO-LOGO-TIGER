@@ -1,0 +1,33 @@
+name: Windows entegrasyon testi
+
+# Gerçek Windows'ta: programın kendi kodu SQL Server Express'i kurar, Logo yapısında veritabanından
+# .bak alınır, uygulama bu yedeği geri yükleyip analiz eder ve sonuçlar karşılaştırılır.
+on:
+  push:
+    branches: [main]
+    paths: ["core/**", "app.py", "tests/**", "requirements.txt", ".github/workflows/entegrasyon.yml"]
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  windows-sql:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
+      - name: Entegrasyon testi
+        run: python tests/entegrasyon_windows.py
+      - name: Kurulum günlükleri (hata olursa)
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem "C:\Program Files\Microsoft SQL Server\*\Setup Bootstrap\Log" -Recurse -Filter Summary*.txt -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "---- $($_.FullName)"; Get-Content $_.FullName -Tail 60 }

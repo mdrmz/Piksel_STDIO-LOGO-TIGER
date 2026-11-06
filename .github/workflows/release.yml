@@ -52,8 +52,12 @@ jobs:
       - run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
       - run: pytest -q tests
 
+  entegrasyon:
+    needs: surum
+    uses: ./.github/workflows/entegrasyon.yml
+
   derle:
-    needs: test
+    needs: [test, entegrasyon]
     strategy:
       fail-fast: false
       matrix:
