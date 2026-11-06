@@ -8,7 +8,7 @@
 Firmaya gidin, programı açın, yedeği seçin, Excel raporunu ya da Power BI paketini alın.
 
 Elle hiçbir şey kurmanız gerekmez: yedeği açmak için gereken SQL Server bilgisayarda yoksa program onu kendisi kurar.
-Her şey kendi bilgisayarınızda çalışır; hiçbir veri internete gönderilmez.
+Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özelliğini açmadığınız sürece hiçbir veri internete gönderilmez.
 
 ![Analiz paneli](docs/panel.png)
 
@@ -152,7 +152,8 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 
 ## Güvenlik ve KVKK
 
-- Program sadece `127.0.0.1` üzerinden çalışır; ağdaki başka bilgisayarlar erişemez. Veri internete gönderilmez.
+- Program sadece `127.0.0.1` üzerinden çalışır; ağdaki başka bilgisayarlar erişemez. Yapay zekâ kullanılmadıkça veri internete gönderilmez;
+  kullanıldığında da varsayılan olarak cari/firma adları gizlenir ([Yapay zekâ](#yapay-zekâ)).
 - Programın kurduğu SQL Server sadece bu bilgisayardan erişilir; `sa` şifresi rastgele üretilir ve şifreli saklanır.
 - Firmanın Logo veritabanında yalnızca `SELECT` çalıştırılır. Yedekten açılan geçici veritabanı iş bitince silinir;
   tarayıcıdan yüklenen `.bak` kopyası da silinir.
@@ -198,8 +199,8 @@ makinelerde SQL Server'ı kurup `.bak` geri yükleme akışını hem kaynak kodd
 **Tek klasörlük paket derleme:** `pip install pyinstaller && pyinstaller LogoTigerAnaliz.spec --noconfirm`
 → `dist/LogoTigerAnaliz/`
 
-**Yeni sürüm yayınlama:** `core/__init__.py` içindeki `__version__` değerini artırıp (ör. `"0.1.1"`) `main`'e gönderin.
-GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0.1.1` etiketini ve Release'i kendisi oluşturur.
+**Yeni sürüm yayınlama:** `core/__init__.py` içindeki `__version__` değerini artırıp (ör. `"0.3.2"`) `main`'e gönderin.
+GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0.3.2` etiketini ve Release'i kendisi oluşturur.
 
 **Klasör yapısı**
 ```
@@ -228,7 +229,8 @@ log çıktısını ekleyin (müşteri verisi içeren dosyaları **eklemeyin**).
 Local tool that restores a **Logo Tiger** ERP backup (`.bak`) into a temporary database on the local SQL Server,
 extracts sales/purchase/stock data with Logo-specific cleaning rules, and produces ABC analysis (products, customers,
 suppliers), monthly trends, dead-stock and stock-turnover reports as a web dashboard, an Excel workbook and a
-Power BI-ready star schema. Runs entirely on `127.0.0.1`; no data leaves the machine.
+Power BI-ready star schema, plus optional AI Q&A (Gemini, DeepSeek, OpenAI, Claude API, Claude Desktop via MCP)
+with customer-name anonymization. Runs entirely on `127.0.0.1`; without AI, no data leaves the machine.
 Download a build from [Releases](../../releases/latest) (Windows, macOS, Linux).
 
 ## Lisans
