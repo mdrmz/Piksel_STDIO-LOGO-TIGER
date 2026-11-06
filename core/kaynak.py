@@ -97,12 +97,32 @@ class MssqlKaynak:
         return [r[0] for r in self._sorgu(
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME")]
 
+    def _tipler(self, tablo):
+        if not hasattr(self, "_tip_onbellek"):
+            self._tip_onbellek = {}
+        if tablo not in self._tip_onbellek:
+            self._tip_onbellek[tablo] = {r[0].upper(): (r[1].lower(), r[2]) for r in self._sorgu(
+                "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_NAME=%s ORDER BY ORDINAL_POSITION", (tablo,))}
+        return self._tip_onbellek[tablo]
+
     def kolonlar(self, tablo):
-        return [r[0].upper() for r in self._sorgu(
-            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=%s ORDER BY ORDINAL_POSITION", (tablo,))]
+        return list(self._tipler(tablo))
 
     def tablo_oku(self, tablo, kolonlar):
-        cols = ", ".join(f"[{_guvenli_ad(c)}]" for c in kolonlar)
+        # varchar/char kolonlar sunucuda nvarchar'a çevrilir: dönüşümü veritabanının kendi harmanlaması
+        # (Logo'da Turkish_CI_AS → cp1254) yapar; sürücünün yanlış kod sayfası seçmesi Türkçe karakterleri bozmaz.
+        tipler = self._tipler(tablo)
+        secim = []
+        for c in kolonlar:
+            ad = _guvenli_ad(c)
+            tip, uz = tipler.get(c.upper(), (None, None))
+            if tip in ("varchar", "char", "text"):
+                hedef = "nvarchar(max)" if tip == "text" or uz in (None, -1) or uz > 4000 else f"nvarchar({max(int(uz), 1)})"
+                secim.append(f"CAST([{ad}] AS {hedef}) AS [{ad}]")
+            else:
+                secim.append(f"[{ad}]")
+        cols = ", ".join(secim)
         cur = self.con.cursor()
         cur.execute(f"SELECT {cols} FROM [dbo].[{_guvenli_ad(tablo)}] WITH (NOLOCK)")
         parcalar = []

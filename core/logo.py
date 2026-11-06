@@ -70,7 +70,7 @@ def firmalari_tara(kaynak) -> list[Firma]:
             for _, r in df.iterrows():
                 no = f"{int(r['NR']):03d}"
                 if no in firmalar:
-                    firmalar[no].ad = str(r["NAME"] or "").strip()
+                    firmalar[no].ad = turkce_onar(str(r["NAME"] or "").strip())
         except Exception:
             pass
     for f in firmalar.values():
@@ -88,6 +88,21 @@ def _oku(kaynak, tablo, istenen: dict):
         if k not in df.columns:
             df[k] = v
     return df[list(istenen)]
+
+
+_BOZUK = set("ÞÝÐþýð")
+_DOGRU = set("ŞİĞşığ")
+
+
+def turkce_onar(metin):
+    """cp1254 baytları cp1252 sanılarak okunmuş metni onarır ("MÜÞTERÝ" -> "MÜŞTERİ").
+    Yanlış harmanlamayla kurulmuş eski Logo veritabanlarında görülür. Metin zaten doğruysa dokunmaz."""
+    if not isinstance(metin, str) or not (_BOZUK & set(metin)) or (_DOGRU & set(metin)):
+        return metin
+    try:
+        return metin.encode("cp1252").decode("cp1254")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return metin
 
 
 @dataclass
@@ -114,14 +129,15 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
     mal.columns = ["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod", "ozel_kod", "kart_tur", "pasif"]
     for d in (cari, mal):
         for c in d.columns:
-            if d[c].dtype == object:
-                d[c] = d[c].fillna("").astype(str).str.strip()
+            if d[c].dtype == object or str(d[c].dtype).startswith("str"):
+                d[c] = d[c].fillna("").astype(str).str.strip().map(turkce_onar)
 
     satirlar = []
     for p in donemler:
         say(f"Dönem {p}: fatura başlıkları okunuyor…")
         inv = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {"LOGICALREF": 0, "FICHENO": "", "CANCELLED": 0, "TRCODE": 0})
         inv.columns = ["invoiceref", "fatura_no", "fatura_iptal", "fatura_trcode"]
+        inv["fatura_no"] = inv["fatura_no"].map(turkce_onar)
         say(f"Dönem {p}: stok hareket satırları okunuyor…")
         st = _oku(kaynak, f"LG_{f}_{p}_STLINE", {
             "LOGICALREF": 0, "STOCKREF": 0, "LINETYPE": 0, "TRCODE": 0, "IOCODE": 0, "DATE_": None,

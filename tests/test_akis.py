@@ -126,3 +126,12 @@ def test_kurulum_sifre_karmasikligi():
         assert len(s) == 24 and any(c.isupper() for c in s) and any(c.islower() for c in s)
         assert any(c.isdigit() for c in s) and any(c in "!#%+-=" for c in s)
         assert not any(c in s for c in "\"'`$;&|<> ")  # ini / komut satırı için güvenli
+
+
+def test_turkce_onarim():
+    from core.logo import turkce_onar
+    assert turkce_onar("MÜÞTERÝ 150 TÝC. LTD. ÞTÝ.") == "MÜŞTERİ 150 TİC. LTD. ŞTİ."
+    assert turkce_onar("DAÐITIM ÇÖZÜMLERÝ") == "DAĞITIM ÇÖZÜMLERİ"
+    assert turkce_onar("MÜŞTERİ A.Ş.") == "MÜŞTERİ A.Ş."      # doğru metne dokunulmaz
+    assert turkce_onar("ABC Ltd") == "ABC Ltd"
+    assert turkce_onar(None) is None
