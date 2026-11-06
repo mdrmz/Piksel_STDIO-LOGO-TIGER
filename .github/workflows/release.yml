@@ -137,4 +137,5 @@ jobs:
             | Linux (64 bit) | `LogoTigerAnaliz-linux-x64.tar.gz` |
 
             Zip'i açın, `LogoTigerAnaliz` klasöründeki programı çalıştırın; tarayıcı kendiliğinden açılır.
-            `.bak` yedeğini geri yüklemek için bilgisayarda SQL Server gerekir — ayrıntılar README'de.
+            Yedeği seçip **Başlat**'a basın. Bilgisayarda SQL Server yoksa program ilk seferde kendisi kurar
+            (Windows: SQL Server 2022 Express, internet + yönetici izni; macOS/Linux: Docker gerekir).

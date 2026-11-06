@@ -1,9 +1,14 @@
 # Logo Tiger Analiz
 
+[![Son sürüm](https://img.shields.io/github/v/release/mdrmz/Piksel_STDIO-LOGO-TIGER?label=s%C3%BCr%C3%BCm)](../../releases/latest)
+[![Windows entegrasyon testi](https://github.com/mdrmz/Piksel_STDIO-LOGO-TIGER/actions/workflows/entegrasyon.yml/badge.svg)](../../actions/workflows/entegrasyon.yml)
+[![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-blue)](LICENSE)
+
 **Logo Tiger yedeğinden (`.bak`) dakikalar içinde satış, stok, müşteri ve tedarikçi analizi.**
 Firmaya gidin, programı açın, yedeği seçin, Excel raporunu ya da Power BI paketini alın.
 
-Kurulum gerektirmeyen, kendi bilgisayarınızda çalışan bir araçtır. Hiçbir veri internete gönderilmez.
+Elle hiçbir şey kurmanız gerekmez: yedeği açmak için gereken SQL Server bilgisayarda yoksa program onu kendisi kurar.
+Her şey kendi bilgisayarınızda çalışır; hiçbir veri internete gönderilmez.
 
 ![Analiz paneli](docs/panel.png)
 
@@ -11,7 +16,7 @@ Kurulum gerektirmeyen, kendi bilgisayarınızda çalışan bir araçtır. Hiçbi
 
 ## İçindekiler
 - [Hızlı başlangıç (fabrikada kullanım)](#hızlı-başlangıç-fabrikada-kullanım)
-- [Gereken tek şey: SQL Server](#gereken-tek-şey-sql-server)
+- [SQL Server: otomatik kurulum](#sql-server-otomatik-kurulum)
 - [Analizler](#analizler)
 - [Çıktılar](#çıktılar)
 - [Logo verisi nasıl yorumlanıyor](#logo-verisi-nasıl-yorumlanıyor)
@@ -37,39 +42,39 @@ Kurulum gerektirmeyen, kendi bilgisayarınızda çalışan bir araçtır. Hiçbi
    Siyah pencere programın kendisidir; iş bitene kadar kapatmayın.
    - Windows "Windows kişisel bilgisayarınızı korudu" derse: **Ek bilgi → Yine de çalıştır**.
    - macOS "açılamıyor" derse, Terminal'de bir kez: `xattr -dr com.apple.quarantine ~/Downloads/LogoTigerAnaliz`
-3. **Yedeği seçin.** *Yedek dosyası (.bak)* sekmesinde Logo yedeğini seçin, SQL Server bilgilerini girin
-   (Logo kurulu bilgisayarlarda genelde sunucu `BILGISAYARADI\SQLEXPRESS` veya `BILGISAYARADI\LOGO`, kullanıcı `sa`).
+3. **Yedeği seçin ve Başlat'a basın.** İlk seferde program kendi SQL Server'ını kurar
+   (internet gerekir, ~5 dakika; Windows "yönetici izni" sorduğunda **Evet** deyin). Sonraki açılışlarda bu adım atlanır.
 4. **Firma ve dönem seçin.** Program yedekteki tüm Logo firmalarını ve dönemlerini kendisi bulur.
 5. **Raporu alın.** Panelde özet görünür; **Excel raporu** ya da **Power BI paketi** düğmesiyle indirin.
 
 > Program yedeği geçici bir veritabanına (`LOGOANALIZ_XXXXXXXX`) geri yükler, verileri okur ve bu geçici veritabanını
 > **siler**. Firmanın kendi Logo veritabanına dokunulmaz, yazılmaz.
 
+> İnternet olmayan bir yere gidecekseniz programı önceden kendi laptopunuzda bir kez çalıştırıp SQL Server'ı kurdurun;
+> sahada internet gerekmez.
+
 Önce denemek isterseniz **Demo veri** sekmesi, Logo tablo yapısında üretilmiş örnek bir firmayla çalışır.
 
 ![Ana ekran](docs/ana.png)
 
-## Gereken tek şey: SQL Server
+## SQL Server: otomatik kurulum
 
-`.bak` dosyası bir SQL Server yedeğidir ve yalnızca SQL Server tarafından açılabilir.
+`.bak` dosyası bir SQL Server yedeğidir ve yalnızca SQL Server tarafından açılabilir. Bunu program halleder:
 
-| Durum | Ne yapılır |
+| Sistem | Program ne yapar |
 |---|---|
-| **Logo kurulu Windows bilgisayar** (en sık durum) | SQL Server zaten var. Ek kurulum gerekmez. |
-| **Kendi Windows laptopunuz** | Ücretsiz [SQL Server Express](https://www.microsoft.com/sql-server/sql-server-downloads)'i bir kez kurun. Kurulumda *Mixed Mode* seçip `sa` şifresi belirleyin. |
-| **macOS / Linux** | [Docker](https://www.docker.com/products/docker-desktop/) kurun, bu repodaki `docker-compose.yml` ile SQL Server'ı başlatın (aşağıda). |
+| **Windows** | Microsoft'un ücretsiz **SQL Server 2022 Express** sürümünü indirir ve `LOGOANALIZ` adıyla sessizce kurar. Sizden sadece Windows'un yönetici izni penceresine "Evet" demeniz istenir. Rastgele üretilen `sa` şifresi Windows DPAPI ile şifrelenip `LogoAnaliz\ayarlar.json`'da saklanır. Port `14330`, yedek klasörü `C:\ProgramData\LogoAnaliz\yedek`. Firmanın kendi Logo SQL Server'ına dokunulmaz. |
+| **macOS / Linux** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) kuruluysa SQL Server konteynerini (`logo-analiz-mssql`) kendisi oluşturur ve başlatır. Docker yoksa indirme bağlantısını gösterir. Apple Silicon Mac'lerde Docker ayarlarında *Use Rosetta for x86_64/amd64 emulation* açık olmalı. |
 
-**macOS / Linux için SQL Server (Docker):**
-```bash
-docker compose up -d          # docker-compose.yml'nin olduğu klasörde
-# .bak dosyasını ./yedekler klasörüne koyun
-```
-Uygulamada: Sunucu `localhost`, kullanıcı `sa`, şifre `LogoAnaliz!2026`,
-*Gelişmiş → "SQL Server'ın dosyayı gördüğü yol"* = `/var/opt/mssql/backup/DOSYA.bak`.
-Apple Silicon Mac'lerde Docker Desktop ayarlarında *Use Rosetta for x86_64/amd64 emulation* açık olmalı.
+İsterseniz *Bu bilgisayardaki başka bir SQL Server* seçeneğiyle mevcut bir sunucuyu (ör. Logo'nun kendi örneği, kullanıcı `sa`)
+da kullanabilirsiniz; program bilgisayardaki örnekleri listeler.
 
-> Yedek, bilgisayardaki SQL Server'dan **daha yeni** bir sürümle alınmışsa geri yüklenemez
-> (ör. SQL Server 2022 yedeği 2019'a açılmaz). Bu durumda bilgisayardaki SQL Server'ı güncelleyin.
+Bu akış her kod değişikliğinde GitHub Actions'ta **gerçek bir Windows makinesinde** baştan sona test edilir:
+SQL Server Express programın kendi koduyla kurulur, Logo yapısında bir veritabanından `.bak` alınır, uygulama bu yedeği
+geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır ([tests/entegrasyon_windows.py](tests/entegrasyon_windows.py)).
+
+> Yedek, kurulu SQL Server'dan **daha yeni** bir sürümle alınmışsa geri yüklenemez. Program SQL Server 2022 kurar;
+> Logo'nun kullandığı 2012–2022 sürümlerinin yedeklerini açar.
 
 ## Analizler
 
@@ -117,6 +122,7 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 ## Güvenlik ve KVKK
 
 - Program sadece `127.0.0.1` üzerinden çalışır; ağdaki başka bilgisayarlar erişemez. Veri internete gönderilmez.
+- Programın kurduğu SQL Server sadece bu bilgisayardan erişilir; `sa` şifresi rastgele üretilir ve şifreli saklanır.
 - Firmanın Logo veritabanında yalnızca `SELECT` çalıştırılır. Yedekten açılan geçici veritabanı iş bitince silinir;
   tarayıcıdan yüklenen `.bak` kopyası da silinir.
 - Analiz klasörü (`~/LogoAnaliz/`) cari adları ve satış tutarları içerir. İş bittiğinde **Önceki analizler → Sil**
@@ -127,7 +133,10 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 
 | Mesaj | Çözüm |
 |---|---|
-| *Yerel SQL Server'a bağlanılamadı* | SQL Server servisi çalışıyor mu? Sunucu adı doğru mu? Adlandırılmış örneklerde (`PC\SQLEXPRESS`) *SQL Server Browser* servisi açık olmalı. Kullanıcı/şifre (genelde `sa`) doğru mu? |
+| *SQL Server Express indirilemedi* | İnternet bağlantısını kontrol edin. Kurumsal ağlarda Microsoft indirmeleri engelli olabilir; programı önce başka bir ağda bir kez çalıştırıp kurulumu tamamlayın. |
+| *Yönetici izni verilmedi* | Kurulum için Windows'un izin penceresinde "Evet" gerekir. Yönetici hesabınız yoksa BT'den yardım isteyin ya da "başka bir SQL Server" seçeneğiyle firmanın mevcut sunucusunu kullanın. |
+| *SQL Server kurulumu başarısız (kod …)* | Ayrıntılar `C:\Program Files\Microsoft SQL Server\…\Setup Bootstrap\Log\Summary.txt` içinde. Bekleyen Windows güncellemesi varsa bilgisayarı yeniden başlatıp tekrar deneyin. |
+| *Yerel SQL Server'a bağlanılamadı* (elle seçilen sunucu) | Servis çalışıyor mu, sunucu adı doğru mu? Adlandırılmış örneklerde (`PC\SQLEXPRESS`) *SQL Server Browser* servisi açık ve TCP/IP etkin olmalı. Kullanıcı/şifre (genelde `sa`) doğru mu? |
 | *Yedek okunamadı… Operating system error 5* | SQL Server servisinin dosyayı okuma izni yok. `.bak`'ı SQL Server'ın `Backup` klasörüne (ör. `C:\Program Files\Microsoft SQL Server\MSSQL15.SQLEXPRESS\MSSQL\Backup`) koyup tam yolunu yazın. |
 | *…is incompatible with this server* | Yedek daha yeni bir SQL Server sürümüyle alınmış; bilgisayardaki SQL Server'ı güncelleyin. |
 | *Logo firma tabloları bulunamadı* | Yedek Logo Tiger/Go veritabanı değil, ya da sadece sistem veritabanı (`LOGODB`) yedeği alınmış. |
@@ -159,13 +168,14 @@ GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0
 **Klasör yapısı**
 ```
 app.py                 yerel web arayüzü (Flask, sadece 127.0.0.1)
+core/kurulum.py        SQL Server'ın otomatik kurulumu (Windows: Express, macOS/Linux: Docker)
 core/kaynak.py         .bak geri yükleme, SQL Server ve SQLite bağlantıları
 core/logo.py           firma/dönem tarama, Logo tablolarından temiz modele aktarım
 core/analiz.py         ABC, trend, ölü stok, stok devir
 core/rapor.py          Excel raporu ve Power BI paketi
 demo/                  Logo yapısında örnek veri üretici
 templates/             arayüz sayfaları
-tests/                 uçtan uca testler
+tests/                 uçtan uca testler + gerçek Windows/SQL Server entegrasyon testi
 .github/workflows/     otomatik test, derleme ve sürüm yayınlama
 ```
 
