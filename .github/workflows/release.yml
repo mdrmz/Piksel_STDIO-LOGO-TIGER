@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
   surum:
     runs-on: ubuntu-latest
@@ -21,7 +25,7 @@ jobs:
       etiket: ${{ steps.s.outputs.etiket }}
       yayinla: ${{ steps.s.outputs.yayinla }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: s
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,8 +45,8 @@ jobs:
     needs: surum
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt pytest
       - run: python demo/demo_db_olustur.py demo/logo_demo.sqlite
@@ -62,8 +66,8 @@ jobs:
             paket: LogoTigerAnaliz-linux-x64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - name: Paketler
         run: pip install -r requirements.txt pyinstaller

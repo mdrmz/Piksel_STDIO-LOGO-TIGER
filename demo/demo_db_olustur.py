@@ -203,6 +203,11 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
 
 def main(cikti="demo/logo_demo.sqlite"):
     import os
+    for akis in (sys.stdout, sys.stderr):  # Windows konsolunda Türkçe karakterler hata vermesin
+        try:
+            akis.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     if os.path.exists(cikti):
         os.remove(cikti)
     con = sqlite3.connect(cikti)
