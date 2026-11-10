@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## v0.3.2 — 2026-11-10
+- **Düzeltme (Windows):** SQL Server Express otomatik kurulumu, program yönetici olmadan açıldığında
+  `WinError 740 — İstenen işlem için yükseltme gerekiyor` hatasıyla duruyordu. Microsoft'un önyükleyicisi
+  (`SQL2022-SSEI-Expr.exe`) yönetici izni istiyor; medya indirme ve dosya açma adımları artık kurulumla birlikte
+  yönetici betiğinde çalışıyor. Sonuç: tek bir UAC penceresi ("Evet"), programı yönetici olarak açmaya gerek yok.
+
 ## v0.3.1 — 2026-11-06
 - **Tanılama paketi:** hata ekranında ve sayfa altında "Tanılama paketi" düğmesi. Günlükler, sürüm, SQL Server/Docker
   durumu ve analizlerin sadece meta bilgisi; müşteri verisi, firma ve kullanıcı adları içermez.

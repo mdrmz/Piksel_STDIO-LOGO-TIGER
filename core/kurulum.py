@@ -260,33 +260,22 @@ def windows_express_kur(ilerleme=print) -> dict:
     os.makedirs(klasor, exist_ok=True)
     sifre = _guclu_sifre()
 
-    # 1) Önyükleyici + kurulum dosyası (yönetici izni gerekmez)
+    # 1) Önyükleyici (yönetici izni gerekmez). Önyükleyicinin kendisi ise yönetici ister
+    #    (manifest: requireAdministrator; normal kullanıcıyla çalıştırınca WinError 740), bu yüzden
+    #    medya indirme ve dosya açma adımları aşağıdaki yönetici betiğinin içinde yapılır: tek UAC penceresi.
     ssei = os.path.join(klasor, "SQL2022-SSEI-Expr.exe")
     medya = os.path.join(klasor, "medya")
-    paket = os.path.join(medya, "SQLEXPR_x64_ENU.exe")
-    if not os.path.exists(paket):
-        if not os.path.exists(ssei):
-            try:
-                _indir(EXPRESS_URL, ssei, ilerleme)
-            except Exception as e:
-                raise KurulumHatasi(f"SQL Server Express indirilemedi (internet bağlantısı?). Ayrıntı: {e}. "
-                                    f"Elle kurmak için: {EXPRESS_SAYFA}") from e
-        ilerleme("SQL Server Express kurulum dosyası indiriliyor (~250 MB, birkaç dakika)…")
-        r = subprocess.run([ssei, "/ACTION=Download", f"MEDIAPATH={medya}", "/MEDIATYPE=Core", "/QUIET"],
-                           capture_output=True, text=True, timeout=3600)
-        if not os.path.exists(paket):
-            adaylar = [f for f in os.listdir(medya) if f.lower().endswith(".exe")] if os.path.isdir(medya) else []
-            if not adaylar:
-                raise KurulumHatasi(f"Kurulum dosyası indirilemedi (kod {r.returncode}). {r.stdout[-300:]} {r.stderr[-300:]}")
-            paket = os.path.join(medya, adaylar[0])
     ac = os.path.join(klasor, "ac")
-    if not os.path.exists(os.path.join(ac, "SETUP.EXE")):
-        ilerleme("Kurulum dosyaları açılıyor…")
-        subprocess.run([paket, "/q", f"/x:{ac}"], capture_output=True, timeout=1800)
-        if not os.path.exists(os.path.join(ac, "SETUP.EXE")):
-            raise KurulumHatasi("Kurulum dosyaları açılamadı.")
+    hazir = os.path.exists(os.path.join(ac, "SETUP.EXE"))
+    medya_var = os.path.isdir(medya) and any(f.lower().endswith(".exe") for f in os.listdir(medya))
+    if not hazir and not medya_var and not os.path.exists(ssei):
+        try:
+            _indir(EXPRESS_URL, ssei, ilerleme)
+        except Exception as e:
+            raise KurulumHatasi(f"SQL Server Express indirilemedi (internet bağlantısı?). Ayrıntı: {e}. "
+                                f"Elle kurmak için: {EXPRESS_SAYFA}") from e
 
-    # 2) Yönetici olarak sessiz kurulum
+    # 2) Yönetici olarak: medya indirme (~250 MB) + dosyaları açma + sessiz kurulum
     kullanici = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
     ini = os.path.join(klasor, "ayar.ini")
     with open(ini, "w", encoding="utf-8") as fh:
@@ -318,6 +307,17 @@ $sonuc = '{ps1}.sonuc'
 try {{
   New-Item -ItemType Directory -Force -Path '{yedek}' | Out-Null
   icacls '{yedek}' /grant '*S-1-1-0:(OI)(CI)M' /T | Out-Null
+  $kurulum = '{os.path.join(ac, "SETUP.EXE")}'
+  if (-not (Test-Path $kurulum)) {{
+    $pk = Get-ChildItem -Path '{medya}' -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pk) {{
+      Start-Process -FilePath '{ssei}' -ArgumentList '/ACTION=Download','"MEDIAPATH={medya}"','/MEDIATYPE=Core','/QUIET' -Wait -NoNewWindow
+      $pk = Get-ChildItem -Path '{medya}' -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    }}
+    if (-not $pk) {{ Set-Content -Path $sonuc -Value '2'; exit 2 }}
+    Start-Process -FilePath $pk.FullName -ArgumentList '/q','"/x:{ac}"' -Wait -NoNewWindow
+    if (-not (Test-Path $kurulum)) {{ Set-Content -Path $sonuc -Value '3'; exit 3 }}
+  }}
   $p = Start-Process -FilePath '{os.path.join(ac, "SETUP.EXE")}' -ArgumentList '/ConfigurationFile="{ini}"' -Wait -PassThru -NoNewWindow
   $kod = $p.ExitCode
   # 3010 = kurulum tamam, yeniden başlatma önerilir
@@ -337,7 +337,7 @@ try {{
   exit 1
 }}
 """)
-    ilerleme("SQL Server Express kuruluyor (5–10 dakika sürebilir, bilgisayarı kapatmayın)…")
+    ilerleme("SQL Server Express indirilip kuruluyor (10–15 dakika sürebilir, bilgisayarı kapatmayın)…")
     try:
         kod = _yonetici_olarak(ps1, ilerleme)
     finally:
@@ -345,6 +345,11 @@ try {{
             os.remove(ini)  # şifre içeriyor
         except OSError:
             pass
+    if kod == 2:
+        raise KurulumHatasi(f"SQL Server Express kurulum dosyası (~250 MB) indirilemedi. İnternet bağlantısını kontrol edin. "
+                            f"Elle kurmak için: {EXPRESS_SAYFA}")
+    if kod == 3:
+        raise KurulumHatasi("SQL Server kurulum dosyaları açılamadı. Diskte yer var mı? Tekrar deneyin.")
     if kod != 0:
         log = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Microsoft SQL Server")
         raise KurulumHatasi(f"SQL Server kurulumu başarısız (kod {kod}). Kurulum günlükleri: {log}\\…\\Setup Bootstrap\\Log")
