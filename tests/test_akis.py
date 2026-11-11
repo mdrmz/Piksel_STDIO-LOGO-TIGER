@@ -80,6 +80,158 @@ def test_olu_stok_bulunur(depo):
     assert (o["stok_miktar"] > 0).all()
 
 
+# ---------------------------------------------------------------------------- v0.4 analizleri
+def _ham_satirlar(con, kosul):
+    """Firma 001'in iki dönemindeki iptal edilmemiş malzeme satırları (ham Logo tablolarından)."""
+    out = []
+    for p in ("01", "02"):
+        out += con.execute(f"""
+            SELECT S.STOCKREF, substr(S.DATE_, 1, 10), S.TRCODE, S.AMOUNT * S.UINFO2 / S.UINFO1, S.VATMATRAH, S.TOTAL,
+                   S.INVOICEREF, COALESCE(I.CANCELLED, 0)
+            FROM LG_001_{p}_STLINE S LEFT JOIN LG_001_{p}_INVOICE I ON I.LOGICALREF = S.INVOICEREF
+            WHERE S.LINETYPE = 0 AND S.CANCELLED = 0 AND {kosul}""").fetchall()
+    return [r for r in out if not r[7]]
+
+
+def test_karlilik_bagimsiz_hesapla_ayni(depo):
+    """Maliyet = satış miktarı × o tarihten önceki en son giriş (alış/devir) günlük ortalama birim fiyatı.
+    Aynı kural burada düz Python döngüsüyle ham tablolardan yeniden hesaplanır."""
+    con = sqlite3.connect(DEMO)
+    girisler, satislar = {}, {}
+    for ref, tarih, _, miktar, matrah, total, _, _ in _ham_satirlar(con, "S.TRCODE IN (1, 13, 14, 50)"):
+        tutar = matrah if matrah and matrah > 0 else total
+        if miktar > 0 and tutar > 0:
+            g = girisler.setdefault(ref, {}).setdefault(tarih, [0.0, 0.0])
+            g[0] += tutar; g[1] += miktar
+    for ref, tarih, trcode, miktar, matrah, _, invref, _ in _ham_satirlar(con, "S.TRCODE IN (2, 3, 7, 8) AND S.INVOICEREF > 0"):
+        isaret = 1 if trcode in (7, 8) else -1
+        satislar.setdefault(ref, []).append((tarih, isaret * miktar, isaret * matrah))
+
+    def birim(ref, tarih):
+        gunler = sorted(girisler.get(ref, {}))
+        once = [g for g in gunler if g <= tarih]
+        g = once[-1] if once else (gunler[0] if gunler else None)
+        return None if g is None else girisler[ref][g][0] / girisler[ref][g][1]
+
+    a = Analiz(depo)
+    k = a.karlilik("malzeme").merge(a.malzeme[["malzeme_kod", "malzeme_ref"]], on="malzeme_kod").set_index("malzeme_ref")
+    assert len(k) == len(satislar)
+    for ref in list(satislar)[::7]:                       # her 7 üründen biri
+        maliyet = sum(m * birim(ref, t) for t, m, _ in satislar[ref])
+        ciro = sum(n for _, _, n in satislar[ref])
+        assert k.loc[ref, "maliyet"] == pytest.approx(maliyet, rel=1e-9, abs=0.01)
+        assert k.loc[ref, "brut_kar"] == pytest.approx(ciro - maliyet, rel=1e-9, abs=0.01)
+    o = a.ozet()
+    assert o["maliyet_kapsama"] == pytest.approx(1.0)
+    assert o["brut_kar"] == pytest.approx(k["brut_kar"].sum(), abs=0.01)
+    assert 0.20 < o["kar_marji"] < 0.40                    # demo: alış ≈ satış fiyatının %62–75'i
+    for seviye in ("cari", "grup"):                        # her kırılımda toplam aynı
+        assert a.karlilik(seviye)["brut_kar"].sum() == pytest.approx(o["brut_kar"], abs=0.01)
+
+
+def test_cari_bakiye_ham_sql_ile_ayni(depo):
+    con = sqlite3.connect(DEMO)
+    ham = pd.read_sql("""SELECT C.CODE AS cari_kod, SUM(CASE WHEN F.SIGN = 0 THEN F.AMOUNT ELSE -F.AMOUNT END) AS b
+                         FROM LG_001_02_CLFLINE F JOIN LG_001_CLCARD C ON C.LOGICALREF = F.CLIENTREF
+                         WHERE F.CANCELLED = 0 GROUP BY C.CODE""", con).set_index("cari_kod")["b"]
+    a = Analiz(depo)
+    al, bo = a.cari_yaslandirma("alacak"), a.cari_yaslandirma("borc")
+    dilim = ["g0_30", "g31_60", "g61_90", "g91_180", "g180p"]
+    for t, isaret in ((al, 1), (bo, -1)):
+        beklenen = (ham * isaret)[lambda x: x > 0.005]
+        assert set(t["cari_kod"]) == set(beklenen.index)
+        assert (t.set_index("cari_kod")["bakiye"] - beklenen).abs().max() < 0.01
+        assert (t[dilim].sum(axis=1) - t["bakiye"]).abs().max() < 0.01      # dilimlerin toplamı bakiyeye eşit
+    co = a.cari_ozet()
+    assert co["alacak"] == pytest.approx(ham[ham > 0.005].sum(), abs=0.01)
+    assert co["borc"] == pytest.approx(-ham[ham < -0.005].sum(), abs=0.01)
+    assert 20 < co["tahsilat_gun"] < 150
+    # tek bir müşteri için FIFO'yu elle doğrula: ödemeler en eski borçtan düşülür
+    kod = al.iloc[0]["cari_kod"]
+    h = pd.read_sql("""SELECT substr(F.DATE_, 1, 10) AS t, F.SIGN, F.AMOUNT FROM LG_001_02_CLFLINE F
+                       JOIN LG_001_CLCARD C ON C.LOGICALREF = F.CLIENTREF
+                       WHERE F.CANCELLED = 0 AND C.CODE = ? ORDER BY F.DATE_, F.LOGICALREF""", con, params=(kod,))
+    kalan_odeme = h.loc[h["SIGN"] == 1, "AMOUNT"].sum()
+    yas = dict.fromkeys(dilim, 0.0)
+    for r in h[h["SIGN"] == 0].itertuples():
+        dusulen = min(kalan_odeme, r.AMOUNT)
+        kalan_odeme -= dusulen
+        gun = (pd.Timestamp("2026-10-31") - pd.Timestamp(r.t)).days
+        d = dilim[0 if gun <= 30 else 1 if gun <= 60 else 2 if gun <= 90 else 3 if gun <= 180 else 4]
+        yas[d] += r.AMOUNT - dusulen
+    for d in dilim:
+        assert al.iloc[0][d] == pytest.approx(yas[d], abs=0.01), d
+
+
+def test_temsilci_depo_toplamlari(depo):
+    a = Analiz(depo)
+    net = a.ozet()["net_satis"]
+    t = a.temsilci_performans()
+    assert t["net_tutar"].sum() == pytest.approx(net, abs=0.01)
+    assert set(t["temsilci_ad"]) == {"AHMET YILMAZ", "AYŞE KAYA", "MURAT DEMİR", "ZEYNEP ÇELİK"}   # diğer firmanınkiler yok
+    assert t["musteri_sayisi"].sum() == 150 and t["pay"].sum() == pytest.approx(1.0)
+    d = a.depo_kirilim()
+    assert d["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+    assert d["net_tutar"].sum() == pytest.approx(net, abs=0.01)
+    assert d["stok_miktar"].sum() == pytest.approx(a.stok["stok_miktar"].sum(), abs=1e-6)   # ambar toplamı = genel stok
+
+
+def test_musteri_kaybi_ve_siparis_onerisi(depo):
+    a = Analiz(depo)
+    k = a.musteri_kaybi()
+    assert len(k) and set(k["durum"]) <= {"Kayıp", "Risk"}
+    kayip, risk = k[k["durum"] == "Kayıp"], k[k["durum"] == "Risk"]
+    assert (kayip["sessiz_gun"] >= (3 * kayip["ort_aralik_gun"]).clip(lower=60)).all()
+    assert (risk["sessiz_gun"] >= (2 * risk["ort_aralik_gun"]).clip(lower=30)).all()
+    assert (k["alim_sayisi"] >= 3).all()
+    s = a.siparis_onerisi()
+    assert len(s) and (s["stok_gun"] < 15).all() and (s["oneri_miktar"] > 0).all()
+    assert (s.loc[s["durum"] == "Acil", "stok_gun"] < 7).all()
+    # öneri stoğu 45 günlük ihtiyaca tamamlar
+    hedef = s["stok_miktar"].clip(lower=0) + s["oneri_miktar"]
+    assert ((hedef - s["gunluk_satis"] * 45).between(0, 1)).all()
+    assert a.siparis_onerisi(tedarik_gun=1000, hedef_gun=1000)["malzeme_kod"].nunique() >= len(s)
+    assert len(a.one_cikanlar()) >= 5
+
+
+def test_eski_surum_analizi_acilir(tmp_path):
+    """v0.3 ile oluşturulmuş analiz klasörleri (yeni tablolar/kolonlar yok) açılmaya ve rapor üretmeye devam etmeli."""
+    yol, bilgi = _gecici_analiz(tmp_path)
+    con = sqlite3.connect(yol)
+    for t in ("fact_cari_hareket", "dim_temsilci", "dim_ambar", "stok_ambar", "malzeme_maliyet"):
+        con.execute(f"DROP TABLE {t}")
+    con.execute("ALTER TABLE fact_satis DROP COLUMN maliyet_tutar")
+    con.execute("ALTER TABLE fact_satis DROP COLUMN birim_maliyet")
+    con.commit(); con.close()
+    from core import yz
+    from core.pdf_ozet import pdf_ozeti
+    from core.rapor import excel_raporu, powerbi_disa_aktar
+    a = Analiz(yol)
+    assert a.eski_surum and a.karlilik() is None and a.cari_ozet() is None and a.cari_yaslandirma() is None
+    assert a.ozet()["brut_kar"] is None and len(a.musteri_kaybi()) and len(a.siparis_onerisi())
+    excel_raporu(a, str(tmp_path / "r.xlsx"))
+    powerbi_disa_aktar(a, yol, str(tmp_path / "pbi"))
+    pdf_ozeti(a, bilgi, str(tmp_path / "o.pdf"))
+    assert "Kârlılık" not in yz.baglam(a, bilgi, yz.Maske(a, bilgi["firma_ad"], True))
+
+
+def test_pdf_ve_excel_yeni_sayfalar(tmp_path):
+    import openpyxl
+    from core.pdf_ozet import pdf_ozeti
+    from core.rapor import excel_raporu
+    yol, bilgi = _gecici_analiz(tmp_path)
+    a = Analiz(yol)
+    pdf = pdf_ozeti(a, bilgi, str(tmp_path / "ozet.pdf"))
+    with open(pdf, "rb") as fh:
+        assert fh.read(5) == b"%PDF-"
+    excel_raporu(a, str(tmp_path / "r.xlsx"))
+    wb = openpyxl.load_workbook(str(tmp_path / "r.xlsx"))
+    assert {"Ürün Kârlılık", "Müşteri Kârlılık", "Grup Kârlılık", "Alacak Yaşlandırma", "Borç Yaşlandırma", "Temsilci",
+            "Müşteri Kaybı", "Sipariş Önerisi", "Depo"} <= set(wb.sheetnames)
+    ws = wb["Alacak Yaşlandırma"]
+    assert ws["A4"].value == "Cari kodu" and ws["D5"].value == pytest.approx(a.cari_yaslandirma().iloc[0]["bakiye"])
+
+
 def test_arayuz_ve_raporlar(tmp_path, monkeypatch):
     monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
     import importlib
@@ -108,6 +260,20 @@ def test_arayuz_ve_raporlar(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.data[:2] == b"PK"
     r = c.get(f"/indir/{aid}/powerbi")
     assert r.status_code == 200 and r.data[:2] == b"PK"
+    import io
+    import zipfile
+    adlar = set(zipfile.ZipFile(io.BytesIO(r.data)).namelist())
+    assert {"fact_cari_hareket.csv", "dim_temsilci.csv", "stok_ambar.csv", "alacak_yaslandirma.csv", "karlilik_urun.csv"} <= adlar
+    r = c.get(f"/indir/{aid}/pdf")
+    assert r.status_code == 200 and r.data[:5] == b"%PDF-"
+    r = c.get(f"/indir/{aid}/yzpaket")
+    assert r.status_code == 200 and "AHMET YILMAZ" not in "".join(
+        zipfile.ZipFile(io.BytesIO(r.data)).read(n).decode("utf-8") for n in zipfile.ZipFile(io.BytesIO(r.data)).namelist())
+    panel = c.get(f"/panel/{aid}").get_data(as_text=True)
+    for baslik in ("Öne çıkanlar", "Kârlılık", "Alacak yaşlandırma", "Müşteri kaybı", "Sipariş önerisi",
+                   "Satış temsilcileri", "Depo (ambar) kırılımı"):
+        assert baslik in panel, baslik
+    assert "<script>" not in panel.split("</title>")[0]      # sekme başlığına betik karışmamalı
 
 
 def test_kurulum_ayar_sifre_saklama(tmp_path, monkeypatch):
@@ -153,6 +319,10 @@ def test_yz_maske_ve_sql(tmp_path):
     m = yz.Maske(a, bilgi["firma_ad"], True)
     baglam = yz.baglam(a, bilgi, m)
     assert "MÜŞTERİ 1" not in baglam and "DEMO YAPI" not in baglam and "Cari-0150" in baglam
+    assert "YILMAZ" not in baglam and "Temsilci-01" in baglam        # satış temsilcisi adları da gizlenir
+    for bolum in ("## Kârlılık", "## Cari bakiyeler", "## Satış temsilcisi performansı", "## Müşteri kaybı",
+                  "## Sipariş önerisi", "## Depo (ambar) kırılımı"):
+        assert bolum in baglam, bolum
     assert m.ac(m.gizle("MÜŞTERİ 150 TİC. LTD. ŞTİ.")) == "MÜŞTERİ 150 TİC. LTD. ŞTİ."
     # takma adla yazılan sorgu gerçek adla çalışır, sonuç yine takma adla döner
     r = yz.sql_calistir(yol, "SELECT cari_ad FROM dim_cari WHERE cari_ad = 'Cari-0150'", m)
@@ -247,6 +417,6 @@ def test_tanilama_paketi_musteri_verisi_icermez(tmp_path, monkeypatch):
     z = zipfile.ZipFile(io.BytesIO(r.data))
     assert {"sistem.json", "gunluk.txt", "OKUBENI.txt"} <= set(z.namelist())
     hepsi = "".join(z.read(n).decode("utf-8") for n in z.namelist())
-    for yasak in ("DEMO YAPI", "DEMO ŞUBE", "MÜŞTERİ", "TEDARİKÇİ"):
+    for yasak in ("DEMO YAPI", "DEMO ŞUBE", "MÜŞTERİ", "TEDARİKÇİ", "YILMAZ", "MERKEZ DEPO"):
         assert yasak not in hepsi, yasak
     assert '"fact_satis":' in hepsi and "Aktarım tamamlandı" in hepsi

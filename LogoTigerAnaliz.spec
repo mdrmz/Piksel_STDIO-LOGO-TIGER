@@ -17,7 +17,7 @@ a = Analysis(
     pathex=[],
     binaries=pm_bins,
     datas=datas + pm_datas,
-    hiddenimports=pm_hidden + ["pymssql", "xlsxwriter", "openpyxl"],
+    hiddenimports=pm_hidden + ["pymssql", "xlsxwriter", "openpyxl", "matplotlib.backends.backend_pdf"],
     excludes=["tkinter", "IPython", "pytest", "PyQt5", "PyQt6", "PySide6"],
     noarchive=False,
 )

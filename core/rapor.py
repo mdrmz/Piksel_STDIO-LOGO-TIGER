@@ -26,11 +26,35 @@ BASLIK = {
     "son_alis": "Son alış", "ort_birim_maliyet": "Ort. alış maliyeti", "tahmini_deger": "Tahmini stok değeri (TL)",
     "yillik_satis": "Yıllık satış miktarı", "devir_hizi": "Devir hızı (yıl)", "stok_gun": "Stok yeterlilik (gün)",
     "kalem_sayisi": "Kalem sayısı", "toplam": "Toplam (TL)", "kalem_payi": "Kalem payı", "deger_payi": "Tutar payı",
+    "maliyet": "Satılan malın maliyeti (TL)", "brut_kar": "Tahmini brüt kâr (TL)", "kar_marji": "Kâr marjı",
+    "kar_payi": "Kârdaki payı", "bakiye": "Bakiye (TL)", "g0_30": "0-30 gün", "g31_60": "31-60 gün",
+    "g61_90": "61-90 gün", "g91_180": "91-180 gün", "g180p": "180+ gün", "en_eski_gun": "En eski açık kayıt (gün)",
+    "gecikmis_pay": "60 günü aşan pay", "temsilci_kod": "Temsilci kodu", "temsilci_ad": "Satış temsilcisi",
+    "ortalama_fatura": "Ortalama fatura (TL)", "iade_tutar": "İade (TL)", "iade_orani": "İade oranı",
+    "durum": "Durum", "alim_sayisi": "Alım sayısı", "ort_aralik_gun": "Ort. alım aralığı (gün)",
+    "sessiz_gun": "Son alımdan beri (gün)", "son_12_ay": "Son 12 ay (TL)", "gunluk_satis": "Günlük satış",
+    "oneri_miktar": "Önerilen sipariş", "son_birim_maliyet": "Son alış fiyatı", "oneri_tutar": "Sipariş tutarı (TL)",
+    "son_tedarikci": "Son tedarikçi", "ambar": "Ambar no", "ambar_ad": "Ambar", "urun_sayisi": "Satılan ürün çeşidi",
+    "stok_kalem": "Stoktaki kalem", "stok_deger": "Stok değeri (TL)", "negatif_kalem": "Eksi stoklu kalem",
 }
-PARA = {"net_tutar", "net_satis", "net_alis", "gecen_yil_ayni_ay", "ort_birim_maliyet", "tahmini_deger", "toplam"}
-YUZDE = {"pay", "kumulatif_pay", "yillik_degisim", "kalem_payi", "deger_payi"}
-SAYI = {"toplam_miktar", "stok_miktar", "yillik_satis", "stok_gun"}
-ONDALIK = {"devir_hizi"}
+PARA = {"net_tutar", "net_satis", "net_alis", "gecen_yil_ayni_ay", "ort_birim_maliyet", "tahmini_deger", "toplam",
+        "maliyet", "brut_kar", "bakiye", "g0_30", "g31_60", "g61_90", "g91_180", "g180p", "ortalama_fatura",
+        "iade_tutar", "son_12_ay", "son_birim_maliyet", "oneri_tutar", "stok_deger"}
+YUZDE = {"pay", "kumulatif_pay", "yillik_degisim", "kalem_payi", "deger_payi", "kar_marji", "kar_payi",
+         "gecikmis_pay", "iade_orani"}
+SAYI = {"toplam_miktar", "stok_miktar", "yillik_satis", "stok_gun", "oneri_miktar", "sessiz_gun", "en_eski_gun"}
+ONDALIK = {"devir_hizi", "gunluk_satis", "ort_aralik_gun"}
+DURUM_RENK = {"Kayıp": "sC", "Risk": "sB", "Acil": "sC", "Sipariş ver": "sB"}
+MALIYET_NOTU = ("Tahmini brüt kâr = net satış − (satış miktarı × o tarihteki son alış fiyatı). "
+                "Yönetim amaçlı tahmindir; muhasebe kârı değildir.")
+
+
+def tl_yaz(v, ondalik=0) -> str:
+    """1234567.8 -> '1.234.568' (Türkçe biçim)."""
+    try:
+        return f"{float(v):,.{ondalik}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (TypeError, ValueError):
+        return ""
 
 
 def _fmt(wb):
@@ -59,6 +83,8 @@ def _tablo_yaz(ws, f, df: pd.DataFrame, satir: int, sutun: int = 0, sinif_renkle
                 ws.write_blank(satir + i, sutun + j, None)
             elif c == "sinif" and sinif_renkle:
                 ws.write(satir + i, sutun + j, v, f.get(f"s{v}"))
+            elif c == "durum" and v in DURUM_RENK:
+                ws.write(satir + i, sutun + j, v, f.get(DURUM_RENK[v]))
             elif c in PARA:
                 ws.write_number(satir + i, sutun + j, float(v), f["para"])
             elif c in YUZDE:
@@ -113,6 +139,34 @@ def _abc_sayfa(wb, f, ad, baslik, tablo: pd.DataFrame, deger="net_tutar", esik=N
     return ws
 
 
+def _liste_sayfa(wb, f, ad, baslik, aciklama, df: pd.DataFrame, bos_mesaj="Kayıt yok."):
+    """Başlık + açıklama + filtreli tablo içeren düz liste sayfası."""
+    ws = wb.add_worksheet(ad)
+    ws.write(0, 0, baslik, f["h1"])
+    ws.write(1, 0, aciklama, f["not"])
+    if df is None or df.empty:
+        ws.write(3, 0, bos_mesaj, f["not"])
+        ws.set_column(0, 0, 40)
+        return ws
+    _tablo_yaz(ws, f, df, 3)
+    _genislik(ws, df)
+    ws.freeze_panes(4, 0)
+    ws.autofilter(3, 0, 3 + len(df), len(df.columns) - 1)
+    return ws
+
+
+def _yaslandirma_sayfa(wb, f, ad, baslik, df, ozet_satir):
+    ws = _liste_sayfa(wb, f, ad, baslik, ozet_satir, df, "Açık bakiye yok.")
+    if df is not None and len(df):
+        dilimler = ["g0_30", "g31_60", "g61_90", "g91_180", "g180p"]
+        r = 3 + len(df) + 2
+        ws.write(r, 0, "Toplam", f["etiket"])
+        for c in ["bakiye"] + dilimler:
+            j = list(df.columns).index(c)
+            ws.write_number(r, j, float(df[c].sum()), f["para"])
+    return ws
+
+
 def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_md: str | None = None):
     with pd.ExcelWriter(yol, engine="xlsxwriter") as xw:
         wb = xw.book
@@ -132,6 +186,16 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
             ("Satış yapılan müşteri", o["musteri_sayisi"], "sayi"), ("Satılan ürün çeşidi", o["urun_sayisi"], "sayi"),
             ("Net alış (KDV hariç)", o["net_alis"], "para"), ("Alış yapılan tedarikçi", o["tedarikci_sayisi"], "sayi"),
         ]
+        if o.get("brut_kar") is not None:
+            satirlar += [("Tahmini brüt kâr (son alış maliyetiyle)", o["brut_kar"], "para"),
+                         ("Tahmini brüt kâr marjı", o["kar_marji"] or 0.0, "yuzde")]
+        co = a.cari_ozet()
+        if co:
+            satirlar += [("Müşterilerden alacak (KDV dahil)", co["alacak"], "para"),
+                         ("  bunun 60 günü aşan kısmı", co["gecikmis"], "para"),
+                         ("Tedarikçilere borç (KDV dahil)", co["borc"], "para")]
+            if co["tahsilat_gun"] is not None:
+                satirlar.append(("Ortalama tahsilat süresi (gün)", co["tahsilat_gun"], "sayi"))
         for i, (k, v, t) in enumerate(satirlar, start=3):
             ws.write(i, 0, k, f["etiket"]); ws.write_number(i, 1, v, f[t])
 
@@ -218,6 +282,46 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
         _tablo_yaz(ws, f, s, 3); _genislik(ws, s); ws.freeze_panes(4, 0)
         ws.autofilter(3, 0, 3 + len(s), len(s.columns) - 1)
 
+        # ---- Kârlılık
+        ku, km, kg = a.karlilik("malzeme"), a.karlilik("cari"), a.karlilik("grup")
+        if ku is not None:
+            _liste_sayfa(wb, f, "Ürün Kârlılık", "Ürün kârlılığı (tahmini brüt kâra göre sıralı)", MALIYET_NOTU, ku)
+            _liste_sayfa(wb, f, "Müşteri Kârlılık", "Müşteri kârlılığı (tahmini brüt kâra göre sıralı)", MALIYET_NOTU, km)
+            _liste_sayfa(wb, f, "Grup Kârlılık", "Malzeme grubu kârlılığı", MALIYET_NOTU, kg)
+
+        # ---- Cari bakiye yaşlandırma
+        if co:
+            not_ = (f"{co['ref_tarih']} itibarıyla · dönem {co['donem']} cari hareketlerinden · tutarlar KDV dahil · "
+                    "ödemeler en eski kayıttan düşülür (FIFO), kalan açık tutar hareket tarihine göre yaşlandırılır")
+            _yaslandirma_sayfa(wb, f, "Alacak Yaşlandırma", "Müşterilerden alacaklar — yaşlandırma",
+                               a.cari_yaslandirma("alacak"), not_)
+            _yaslandirma_sayfa(wb, f, "Borç Yaşlandırma", "Tedarikçilere borçlar — yaşlandırma",
+                               a.cari_yaslandirma("borc"), not_)
+
+        # ---- Satış temsilcisi
+        tp = a.temsilci_performans()
+        if tp is not None:
+            _liste_sayfa(wb, f, "Temsilci", "Satış temsilcisi performansı",
+                         "Net satış iadeler düşülmüş tutardır. " + MALIYET_NOTU, tp)
+
+        # ---- Müşteri kaybı
+        _liste_sayfa(wb, f, "Müşteri Kaybı", "Alımı kesilen ya da seyrekleşen müşteriler",
+                     "Kayıp: son alımından bu yana kendi ortalama alım aralığının 3 katından (en az 60 gün) uzun süre geçmiş · "
+                     "Risk: 2 katından (en az 30 gün) uzun süre geçmiş. En az 3 ayrı günde alım yapmış müşteriler.",
+                     a.musteri_kaybi(), "Kayıp ya da risk altında müşteri görünmüyor.")
+
+        # ---- Sipariş önerisi
+        _liste_sayfa(wb, f, "Sipariş Önerisi", "Sipariş önerisi — stoğu bitmek üzere olan malzemeler",
+                     "Son 90 günün satış hızına göre stoğu 15 günden az yetecek malzemeler; öneri stoğu 45 günlük ihtiyaca tamamlar. "
+                     "Acil: stok bitmiş ya da 7 günden az. Tutar son alış fiyatıyla hesaplanır.",
+                     a.siparis_onerisi(), "Sipariş gerektiren malzeme görünmüyor.")
+
+        # ---- Depo
+        dk = a.depo_kirilim()
+        if dk is not None:
+            _liste_sayfa(wb, f, "Depo", "Ambar (depo) bazında satış ve stok",
+                         "Stok değeri son alış fiyatıyla hesaplanır. Eksi stoklu kalemler Logo'da eksik giriş/transfer kaydına işaret eder.", dk)
+
         for sayfa in wb.worksheets():   # yazdırma: yatay, sayfa genişliğine sığdır
             sayfa.set_landscape()
             sayfa.set_paper(9)
@@ -244,7 +348,21 @@ Bu klasördeki CSV dosyaları yıldız şemadır (UTF-8, ayraç: virgül, ondal�
      İade Tutarı   = -CALCULATE(SUM(fact_satis[net_tutar]), fact_satis[iade] = TRUE())
      Fatura Sayısı = DISTINCTCOUNT(fact_satis[fatura_no])
      Geçen Yıl     = CALCULATE([Net Satış], SAMEPERIODLASTYEAR(dim_tarih[tarih]))
-4) abc_urun / abc_musteri / abc_tedarikci tabloları uygulamanın hesapladığı ABC sınıflarıdır;
+     Maliyet       = SUM(fact_satis[maliyet_tutar])
+     Brüt Kâr      = CALCULATE([Net Satış] - [Maliyet], NOT ISBLANK(fact_satis[maliyet_tutar]))
+     Kâr Marjı     = DIVIDE([Brüt Kâr], CALCULATE([Net Satış], NOT ISBLANK(fact_satis[maliyet_tutar])))
+     Cari Bakiye   = SUM(fact_cari_hareket[borc]) - SUM(fact_cari_hareket[alacak])
+   Ek ilişkiler:
+     dim_temsilci[temsilci_ref] ->  fact_satis[satis_temsilci_ref]
+     dim_ambar[ambar]           ->  fact_satis[ambar], fact_alis[ambar], stok_ambar[ambar]
+     dim_cari[cari_ref]         ->  fact_cari_hareket[cari_ref]
+     dim_malzeme[malzeme_ref]   ->  stok_ambar[malzeme_ref], malzeme_maliyet[malzeme_ref]
+   maliyet_tutar: satış miktarı × o tarihteki son alış fiyatı (tahmini; muhasebe kârı değildir).
+   fact_cari_hareket: en son dönemin cari hareketleri (borc/alacak, KDV dahil; devir fişi önceki bakiyeyi taşır).
+4) Hazır analiz tabloları (uygulamanın hesapladığı sonuçlar; doğrudan tablo/görsel olarak kullanılabilir):
+     alacak_yaslandirma, borc_yaslandirma, temsilci_performans, musteri_kaybi, siparis_onerisi, depo_kirilim,
+     karlilik_urun, karlilik_musteri
+5) abc_urun / abc_musteri / abc_tedarikci tabloları uygulamanın hesapladığı ABC sınıflarıdır;
    malzeme_kod / cari_kod üzerinden dim tablolarına bağlayıp görsellerde "sinif" alanını kullanabilirsiniz.
 
 Tutarlar KDV hariç nettir (Logo VATMATRAH). Miktarlar ana birimdedir. İptal faturalar ve
@@ -255,18 +373,30 @@ faturalanmamış irsaliyeler dışlanmıştır; iadeler eksi tutarlıdır.
 def powerbi_disa_aktar(a: Analiz, depo: str, klasor: str) -> str:
     os.makedirs(klasor, exist_ok=True)
     con = sqlite3.connect(depo)
-    for t in ["dim_cari", "dim_malzeme", "dim_tarih", "fact_satis", "fact_alis", "stok_bakiye"]:
+    var = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for t in ["dim_cari", "dim_malzeme", "dim_tarih", "fact_satis", "fact_alis", "stok_bakiye",
+              "dim_temsilci", "dim_ambar", "stok_ambar", "malzeme_maliyet", "fact_cari_hareket"]:
+        if t not in var:   # eski sürümle oluşturulmuş analiz
+            continue
         df = pd.read_sql_query(f"SELECT * FROM {t}", con)
+        for c in ("tarih", "son_giris_tarih"):
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c]).dt.strftime("%Y-%m-%d")
         for c in ("iade", "faturali"):
             if c in df.columns:
                 df[c] = df[c].astype(bool)
-        if "tarih" in df.columns:
-            df["tarih"] = pd.to_datetime(df["tarih"]).dt.strftime("%Y-%m-%d")
         df.to_csv(os.path.join(klasor, f"{t}.csv"), index=False, encoding="utf-8-sig")
     con.close()
     a.urun_abc().to_csv(os.path.join(klasor, "abc_urun.csv"), index=False, encoding="utf-8-sig")
     a.musteri_abc().to_csv(os.path.join(klasor, "abc_musteri.csv"), index=False, encoding="utf-8-sig")
     a.tedarikci_abc().to_csv(os.path.join(klasor, "abc_tedarikci.csv"), index=False, encoding="utf-8-sig")
+    hazir = {"alacak_yaslandirma": a.cari_yaslandirma("alacak"), "borc_yaslandirma": a.cari_yaslandirma("borc"),
+             "temsilci_performans": a.temsilci_performans(), "musteri_kaybi": a.musteri_kaybi(),
+             "siparis_onerisi": a.siparis_onerisi(), "depo_kirilim": a.depo_kirilim(),
+             "karlilik_urun": a.karlilik("malzeme"), "karlilik_musteri": a.karlilik("cari")}
+    for ad, df in hazir.items():
+        if df is not None:
+            df.to_csv(os.path.join(klasor, f"{ad}.csv"), index=False, encoding="utf-8-sig")
     with open(os.path.join(klasor, "OKUBENI_PowerBI.txt"), "w", encoding="utf-8") as fh:
         fh.write(POWERBI_OKUBENI)
     zip_yol = klasor.rstrip("/\\") + ".zip"

@@ -8,6 +8,10 @@ Gerçek Logo'daki isimlendirme ve kolonlar kullanılır:
 İçine bilerek "tuzaklar" konur (iptal fatura, indirim satırı, faturalanmamış irsaliye,
 iade, dönem başı devir fişi) — analiz katmanının bunları doğru ayıkladığını test etmek için.
 
+Ek tablolar: LG_{firma}_{donem}_CLFLINE (cari hareketler: fatura borçları, tahsilatlar, ödemeler, devir),
+LG_SLSMAN (satış elemanları), L_CAPIWHOUSE (ambarlar). Bunlar ayrı bir rastgele üreteçle (R2) üretilir;
+böylece satış/alış satırları önceki sürümlerle birebir aynı kalır.
+
 Kullanım:  python demo/demo_db_olustur.py [cikti.sqlite]
 """
 import random
@@ -17,6 +21,7 @@ import sys
 from datetime import date, timedelta
 
 random.seed(42)
+R2 = random.Random(2026)   # ek tablolar için; ana üretecin sırasını bozmaz
 
 SEHIRLER = ["GAZİANTEP", "İSTANBUL", "ANKARA", "İZMİR", "ADANA", "KONYA", "BURSA", "KAYSERİ", "MERSİN", "ŞANLIURFA"]
 GRUPLAR = ["HIRDAVAT", "ELEKTRİK", "BOYA", "SIHHİ TESİSAT", "İNŞAAT MLZ", "AMBALAJ"]
@@ -33,6 +38,12 @@ INVOICE_DDL = """CREATE TABLE {t} (
   LOGICALREF INTEGER PRIMARY KEY, GRPCODE INTEGER, TRCODE INTEGER, FICHENO TEXT, DATE_ TEXT,
   CLIENTREF INTEGER, SOURCEINDEX INTEGER, CANCELLED INTEGER, GROSSTOTAL REAL, TOTALDISCOUNTS REAL,
   TOTALVAT REAL, NETTOTAL REAL, SALESMANREF INTEGER)"""
+CLFLINE_DDL = """CREATE TABLE {t} (
+  LOGICALREF INTEGER PRIMARY KEY, CLIENTREF INTEGER, DATE_ TEXT, MODULENR INTEGER, TRCODE INTEGER,
+  SIGN INTEGER, AMOUNT REAL, CANCELLED INTEGER, TRANNO TEXT, LINEEXP TEXT)"""
+SLSMAN_DDL = """CREATE TABLE IF NOT EXISTS LG_SLSMAN (
+  LOGICALREF INTEGER PRIMARY KEY, CODE TEXT, DEFINITION_ TEXT, FIRMNR INTEGER, ACTIVE INTEGER)"""
+TEMSILCILER = ["AHMET YILMAZ", "AYŞE KAYA", "MURAT DEMİR", "ZEYNEP ÇELİK", "HASAN ŞAHİN", "ELİF AYDIN"]
 STLINE_DDL = """CREATE TABLE {t} (
   LOGICALREF INTEGER PRIMARY KEY, STOCKREF INTEGER, LINETYPE INTEGER, TRCODE INTEGER, DATE_ TEXT,
   IOCODE INTEGER, STFICHEREF INTEGER, INVOICEREF INTEGER, CLIENTREF INTEGER, SOURCEINDEX INTEGER,
@@ -68,6 +79,23 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
     musteri_refs = [c[0] for c in cariler if c[2] == 1]
     tedarikci_refs = [c[0] for c in cariler if c[2] == 2]
 
+    # ---- Satış elemanları: her müşteri bir temsilciye bağlı
+    con.execute(SLSMAN_DDL)
+    ts_bas = (con.execute("SELECT COALESCE(MAX(LOGICALREF), 0) FROM LG_SLSMAN").fetchone()[0]) + 1
+    n_ts = 4 if n_musteri > 100 else 2
+    ts_refs = list(range(ts_bas, ts_bas + n_ts))
+    con.executemany("INSERT INTO LG_SLSMAN VALUES (?,?,?,?,?)",
+                    [(r, f"ST.{r:02d}", TEMSILCILER[(r - 1) % len(TEMSILCILER)], firma, 0) for r in ts_refs])
+    musteri_ts = {m: R2.choices(ts_refs, weights=[4, 3, 2, 1][:n_ts])[0] for m in musteri_refs}
+    # ödeme alışkanlığı (gün): çoğu 20-50 günde öder, bir kısmı geç, birkaçı hiç ödemez
+    def _odeme_profili():
+        x = R2.random()
+        return (20, 50) if x < 0.70 else (60, 100) if x < 0.90 else (120, 220) if x < 0.98 else None
+    musteri_odeme = {m: _odeme_profili() for m in musteri_refs}
+    cari_olay = []   # (tarih, cari_ref, sign, tutar, trcode, belge)
+    sube_stok = defaultdict(float)    # ambar 1 (şube) stoğu
+    sube_hafta = defaultdict(float)   # şubenin bu haftaki satışı
+
     # ---- Malzeme kartları (fiyat ve popülerlik Pareto dağılımlı)
     urunler = []
     for i in range(n_urun):
@@ -98,21 +126,28 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
         inv_rows, st_rows = [], []
 
         def satir(stockref, linetype, trcode, d, iocode, invref, clref, amount, price, distdisc=0.0,
-                  cancelled=0, u1=1.0, u2=1.0):
+                  cancelled=0, u1=1.0, u2=1.0, ambar=0, ts=0):
             nonlocal st_ref
             total = round(amount * price, 2)
             matrah = round(total - distdisc, 2)
             vatamnt = round(matrah * 0.20, 2)
             st_rows.append((st_ref, stockref, linetype, trcode, f"{d.isoformat()} 00:00:00", iocode, 0, invref,
-                            clref, 0, amount, price, total, distdisc, matrah, 20.0, vatamnt, matrah, u1, u2,
-                            cancelled, 0))
+                            clref, ambar, amount, price, total, distdisc, matrah, 20.0, vatamnt, matrah, u1, u2,
+                            cancelled, ts))
             st_ref += 1
 
-        # Dönem başı devir fişi (TRCODE 14) — önceki dönemden kalan stok
+        # Dönem başı devir fişi (TRCODE 14) — önceki dönemden kalan stok (ambar bazında)
         if pi > 0:
             for sref, miktar in stok.items():
                 if miktar > 0:
-                    satir(sref, 0, 14, bas, 1, 0, 0, miktar, fiyat[sref] * 0.7)
+                    sube = min(max(sube_stok[sref], 0.0), miktar)
+                    if miktar - sube > 0:
+                        satir(sref, 0, 14, bas, 1, 0, 0, miktar - sube, fiyat[sref] * 0.7)
+                    if sube > 0:
+                        satir(sref, 0, 14, bas, 1, 0, 0, sube, fiyat[sref] * 0.7, ambar=1)
+                    sube_stok[sref] = sube
+                else:
+                    sube_stok[sref] = 0.0
 
         # İlk dönemin başında ölü stok ürünlerinin alımı
         if pi == 0:
@@ -133,6 +168,14 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
                 for sref in satilan_urunler:
                     son_satis[sref].append(hafta[sref])
                     hafta[sref] = 0.0
+                # ambar transferi (TRCODE 25): şubeyi geçen haftaki satışının 1,5 katına tamamla (merkezde varsa)
+                for sref, sat in list(sube_hafta.items()):
+                    gonder = min(int(1.5 * sat - sube_stok[sref]) + 1, int(stok[sref] - sube_stok[sref]))
+                    if gonder > 0:
+                        satir(sref, 0, 25, d, 3, 0, 0, gonder, round(fiyat[sref] * 0.7, 2))           # merkezden çıkış
+                        satir(sref, 0, 25, d, 2, 0, 0, gonder, round(fiyat[sref] * 0.7, 2), ambar=1)  # şubeye giriş
+                        sube_stok[sref] += gonder
+                sube_hafta.clear()
                 siparis = defaultdict(list)
                 for sref in satilan_urunler:
                     talep = sum(son_satis[sref][-4:])
@@ -154,8 +197,10 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
                 faturasiz = random.random() < 0.03                     # tuzak: faturalanmamış irsaliye
                 trcode = 8 if random.random() < 0.85 else 7
                 invref = 0 if faturasiz else inv_ref
+                ts = musteri_ts[mus]
+                amb = 1 if R2.random() < 0.2 else 0     # satışların ~%20'si şube deposundan
                 if not faturasiz:
-                    inv_rows.append([inv_ref, 2, trcode, f"STF{fis_no:07d}", f"{d.isoformat()} 00:00:00", mus, 0, iptal, 0, 0, 0, 0, 0])
+                    inv_rows.append([inv_ref, 2, trcode, f"STF{fis_no:07d}", f"{d.isoformat()} 00:00:00", mus, amb, iptal, 0, 0, 0, 0, ts])
                 kalemler = random.choices(satilan_urunler, weights=[pop[s] for s in satilan_urunler], k=random.randint(1, 6))
                 ara_toplam = 0.0
                 for sref in set(kalemler):
@@ -164,14 +209,17 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
                     birim_fiyat = round(fiyat[sref] * (12 if koli else 1) * random.uniform(0.95, 1.1), 2)
                     disc = round(miktar * birim_fiyat * random.choice([0, 0, 0, 0.05, 0.10]), 2)
                     satir(sref, 0, trcode, d, 4, invref, mus, miktar, birim_fiyat, distdisc=disc,
-                          cancelled=iptal, u1=1.0, u2=12.0 if koli else 1.0)
+                          cancelled=iptal, u1=1.0, u2=12.0 if koli else 1.0, ambar=amb, ts=ts)
                     ara_toplam += miktar * birim_fiyat - disc
                     if not iptal:
                         stok[sref] -= miktar * (12 if koli else 1)
                         hafta[sref] += miktar * (12 if koli else 1)
+                        if amb:
+                            sube_stok[sref] -= miktar * (12 if koli else 1)
+                            sube_hafta[sref] += miktar * (12 if koli else 1)
                 # tuzak: dip indirim satırı (LINETYPE=2) — ciroya ikinci kez sayılmamalı
                 if random.random() < 0.10 and not faturasiz:
-                    satir(0, 2, trcode, d, 0, invref, mus, 0, 0, cancelled=iptal)
+                    satir(0, 2, trcode, d, 0, invref, mus, 0, 0, cancelled=iptal, ambar=amb, ts=ts)
                     st_rows[-1] = st_rows[-1][:12] + (round(ara_toplam * 0.03, 2),) + st_rows[-1][13:]
                 if not faturasiz:
                     inv_ref += 1
@@ -180,8 +228,8 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
                 if random.random() < 0.03 and not iptal:
                     sref = random.choice(kalemler)
                     miktar = random.randint(1, 5)
-                    inv_rows.append([inv_ref, 2, 3, f"SIF{fis_no:07d}", f"{d.isoformat()} 00:00:00", mus, 0, 0, 0, 0, 0, 0, 0])
-                    satir(sref, 0, 3, d, 1, inv_ref, mus, miktar, fiyat[sref])
+                    inv_rows.append([inv_ref, 2, 3, f"SIF{fis_no:07d}", f"{d.isoformat()} 00:00:00", mus, 0, 0, 0, 0, 0, 0, ts])
+                    satir(sref, 0, 3, d, 1, inv_ref, mus, miktar, fiyat[sref], ts=ts)
                     stok[sref] += miktar
                     inv_ref += 1
                     fis_no += 1
@@ -196,9 +244,49 @@ def firma_olustur(con, firma, donemler, n_musteri, n_tedarikci, n_urun, fatura_g
             g, m, v = toplamlar.get(row[0], [0, 0, 0])
             row[8], row[9], row[10], row[11] = round(g, 2), round(g - m, 2), round(v, 2), round(m + v, 2)
 
+        # ---- cari hareket olayları (fatura borcu/alacağı + tahsilat/ödeme)
+        for row in inv_rows:
+            if row[7] or not row[11]:      # iptal ya da tutarsız
+                continue
+            ft = date.fromisoformat(row[4][:10])
+            cl, tutar, tr = row[5], row[11], row[2]
+            if tr in (7, 8):               # satış faturası: müşteri borçlanır, sonra tahsilat
+                cari_olay.append((ft, cl, 0, tutar, 37 if tr == 7 else 38, row[3]))
+                prof = musteri_odeme[cl]
+                if prof and R2.random() < 0.97:
+                    cari_olay.append((ft + timedelta(days=R2.randint(*prof)), cl, 1, tutar, 20, "HVL" + row[3][3:]))
+            elif tr == 3:                  # satış iade faturası: müşteri alacaklanır
+                cari_olay.append((ft, cl, 1, tutar, 33, row[3]))
+            elif tr == 1:                  # alış faturası: tedarikçi alacaklanır, 30-60 günde ödenir
+                cari_olay.append((ft, cl, 1, tutar, 31, row[3]))
+                cari_olay.append((ft + timedelta(days=R2.randint(30, 60)), cl, 0, tutar, 21, "ODM" + row[3][3:]))
+
         con.executemany(f"INSERT INTO {tinv} VALUES ({','.join('?' * 13)})", inv_rows)
         con.executemany(f"INSERT INTO {tst} VALUES ({','.join('?' * 22)})", st_rows)
         print(f"  {tinv}: {len(inv_rows):>6} fatura   {tst}: {len(st_rows):>7} satır")
+
+    # ---- Cari hareket tabloları: olaylar tarihine göre döneme dağıtılır; her dönem bir önceki bakiyeyi devir alır
+    son_gun = donemler[-1][2]
+    bakiye = defaultdict(float)
+    for pi, (donem, bas, bit) in enumerate(donemler):
+        t = f"LG_{f}_{donem:02d}_CLFLINE"
+        con.execute(CLFLINE_DDL.format(t=t))
+        rows, ref = [], 1
+        if pi > 0:
+            for cl, b in sorted(bakiye.items()):
+                if abs(b) >= 0.01:
+                    rows.append((ref, cl, f"{bas.isoformat()} 00:00:00", 5, 14, 0 if b > 0 else 1, round(abs(b), 2), 0,
+                                 "DEVIR", "Açılış fişi"))
+                    ref += 1
+        for tarih, cl, sign, tutar, tr, belge in sorted(o for o in cari_olay if bas <= o[0] <= min(bit, son_gun)):
+            rows.append((ref, cl, f"{tarih.isoformat()} 00:00:00", 4 if tr > 30 else 7, tr, sign, round(tutar, 2), 0, belge, ""))
+            ref += 1
+            bakiye[cl] += tutar if sign == 0 else -tutar
+            if R2.random() < 0.004:        # tuzak: iptal edilmiş cari hareket — bakiyeye sayılmamalı
+                rows.append((ref, cl, f"{tarih.isoformat()} 00:00:00", 5, 3, 0, round(tutar * 3, 2), 1, "IPTAL", "İptal dekont"))
+                ref += 1
+        con.executemany(f"INSERT INTO {t} VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+        print(f"  {t}: {len(rows):>6} cari hareket")
 
 
 def main(cikti="demo/logo_demo.sqlite"):
@@ -221,6 +309,9 @@ def main(cikti="demo/logo_demo.sqlite"):
     con.execute("CREATE TABLE L_CAPIFIRM (NR INTEGER, NAME TEXT, TITLE TEXT)")
     con.executemany("INSERT INTO L_CAPIFIRM VALUES (?,?,?)",
                     [(1, "DEMO YAPI MARKET", "DEMO YAPI MARKET SAN. VE TİC. A.Ş."), (2, "DEMO ŞUBE", "DEMO ŞUBE LTD. ŞTİ.")])
+    con.execute("CREATE TABLE L_CAPIWHOUSE (FIRMNR INTEGER, NR INTEGER, NAME TEXT)")
+    con.executemany("INSERT INTO L_CAPIWHOUSE VALUES (?,?,?)",
+                    [(1, 0, "MERKEZ DEPO"), (1, 1, "ŞUBE DEPO"), (2, 0, "MERKEZ DEPO"), (2, 1, "ŞUBE DEPO")])
     con.execute("CREATE TABLE L_CAPIPERIOD (FIRMNR INTEGER, NR INTEGER, BEGDATE TEXT, ENDDATE TEXT)")
     con.executemany("INSERT INTO L_CAPIPERIOD VALUES (?,?,?,?)",
                     [(1, 1, "2025-01-01", "2025-12-31"), (1, 2, "2026-01-01", "2026-12-31"), (2, 1, "2026-01-01", "2026-12-31")])

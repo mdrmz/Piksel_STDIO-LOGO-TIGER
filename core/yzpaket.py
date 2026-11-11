@@ -13,10 +13,10 @@ from .yz import Maske, baglam
 TALIMAT = """Bu dosyalar bir firmanın Logo Tiger ERP verisinden çıkarılmış satış/stok analizidir.
 Lütfen önce OZET.md dosyasını oku, gerekirse CSV dosyalarına bak, sonra Türkçe olarak:
 
-1. Firmanın genel durumunu 5 maddede özetle (satış trendi, yoğunlaşma riski, iade, stok).
+1. Firmanın genel durumunu 5 maddede özetle (satış trendi, kârlılık, alacaklar, yoğunlaşma riski, stok).
 2. ABC analizine göre hangi ürün ve müşterilere odaklanılması gerektiğini söyle.
 3. Geçen yıla göre en çok düşen müşteriler için olası nedenleri ve atılacak adımları öner.
-4. Ölü stok için somut bir eritme planı öner.
+4. Ölü stok için somut bir eritme planı, gecikmiş alacaklar için tahsilat önceliği öner.
 5. Yönetime sunulacak 5 maddelik aksiyon listesi çıkar.
 
 Kurallar: Sadece bu verilere dayan, uydurma. Rakamları Türkçe biçimde yaz (1.234.567 TL).
@@ -46,6 +46,11 @@ def paket_olustur(a, bilgi: dict, hedef: str, anonim: bool = True) -> str:
         "olu_stok.csv": a.olu_stok(bilgi.get("olu_stok_gun", 90)),
         "stok_devir.csv": a.stok_devir(),
     }
+    ek = {"karlilik_urun.csv": a.karlilik("malzeme"), "karlilik_musteri.csv": a.karlilik("cari"),
+          "alacak_yaslandirma.csv": a.cari_yaslandirma("alacak"), "borc_yaslandirma.csv": a.cari_yaslandirma("borc"),
+          "temsilci_performans.csv": a.temsilci_performans(), "musteri_kaybi.csv": a.musteri_kaybi(),
+          "siparis_onerisi.csv": a.siparis_onerisi(), "depo_kirilim.csv": a.depo_kirilim()}
+    dosyalar.update({ad: maske.tablo(df) for ad, df in ek.items() if df is not None})
     for sev, ad in (("cari", "musteri_gecen_yil.csv"), ("malzeme", "urun_gecen_yil.csv")):
         k = a.donem_karsilastirma(sev)
         if k is not None:
