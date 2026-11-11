@@ -442,9 +442,32 @@ def indir(aid, tur):
         zip_yol = paket_olustur(a, bilgi, os.path.join(klasor, f"YZ_Paketi_{ad}.zip"), yz.ayar().get("anonim", True))
         return send_file(zip_yol, as_attachment=True)
     if tur == "powerbi":
-        zip_yol = powerbi_disa_aktar(a, os.path.join(klasor, "analiz.sqlite"), os.path.join(klasor, f"PowerBI_{ad}"))
+        zip_yol = powerbi_disa_aktar(a, os.path.join(klasor, "analiz.sqlite"), os.path.join(klasor, f"PowerBI_{ad}"),
+                                     bilgi.get("olu_stok_gun", 90))
         return send_file(zip_yol, as_attachment=True)
     abort(404)
+
+
+@app.route("/powerbi-ac/<aid>", methods=["POST"])
+def powerbi_ac(aid):
+    """Hazır Power BI raporunu üretir ve bu bilgisayarda Power BI Desktop ile açar (yalnızca Windows)."""
+    from core.powerbi import RAPOR_ADI
+    from core.rapor import powerbi_disa_aktar
+    klasor, bilgi, a = _analiz_ac(aid)
+    ad = re.sub(r"[^\w\-]", "", f"{bilgi['firma']}_{(bilgi.get('firma_ad') or 'firma').replace(' ', '_')}")
+    hedef = os.path.join(klasor, f"PowerBI_{ad}")
+    powerbi_disa_aktar(a, os.path.join(klasor, "analiz.sqlite"), hedef, bilgi.get("olu_stok_gun", 90))
+    pbit = os.path.join(hedef, RAPOR_ADI)
+    if sys.platform != "win32":
+        return jsonify(ok=False, mesaj="Power BI Desktop yalnızca Windows'ta çalışır. Rapor dosyası hazırlandı; "
+                                       f"Windows'lu bir bilgisayarda açmak için Power BI paketini indirin. ({pbit})")
+    try:
+        os.startfile(pbit)  # noqa: S606 — kendi ürettiğimiz dosya, kullanıcının bilgisayarında varsayılan programla açılır
+    except OSError:
+        return jsonify(ok=False, mesaj="Power BI Desktop bu bilgisayarda kurulu görünmüyor. Microsoft Store'dan "
+                                       "\"Power BI Desktop\" (ücretsiz) kurup tekrar deneyin.")
+    tanilama.yaz("Power BI raporu açıldı.")
+    return jsonify(ok=True, mesaj="Power BI Desktop açılıyor; veriler yüklenince rapor hazır olur (yaklaşık yarım dakika).")
 
 
 @app.route("/tanilama")

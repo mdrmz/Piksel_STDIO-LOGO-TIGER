@@ -46,7 +46,7 @@ Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özel
 3. **Yedeği seçin ve Başlat'a basın.** İlk seferde program kendi SQL Server'ını kurar
    (internet gerekir, ~5 dakika; Windows "yönetici izni" sorduğunda **Evet** deyin). Sonraki açılışlarda bu adım atlanır.
 4. **Firma ve dönem seçin.** Program yedekteki tüm Logo firmalarını ve dönemlerini kendisi bulur.
-5. **Raporu alın.** Panelde özet görünür; **Excel raporu**, **PDF özet** ya da **Power BI paketi** düğmesiyle indirin.
+5. **Raporu alın.** Panelde özet görünür; **Excel raporu** ya da **PDF özet** düğmesiyle indirin, **Power BI raporu aç** ile hazır raporu Power BI'da açın.
 
 > Program yedeği geçici bir veritabanına (`LOGOANALIZ_XXXXXXXX`) geri yükler, verileri okur ve bu geçici veritabanını
 > **siler**. Firmanın kendi Logo veritabanına dokunulmaz, yazılmaz.
@@ -109,7 +109,10 @@ Kârlılık, alacak, temsilci ve depo analizleri yedekte ilgili Logo tabloları 
   Depo sayfaları. Filtreli, dondurulmuş başlıklı, A4 yatay yazdırmaya hazır.
 - **PDF yönetici özeti** (`.pdf`): yönetime sunulacak tek sayfa A4; temel göstergeler, aylık grafik, ilk 5 ürün ve
   müşteri, alacak yaşlandırma, öne çıkanlar.
-- **Power BI paketi** (`.zip`): yıldız şema CSV'leri (`fact_satis`, `fact_alis`, `fact_cari_hareket`, `dim_cari`,
+- **Hazır Power BI raporu**: paneldeki **Power BI raporu aç** düğmesi beş sayfalık raporu (Özet, Kârlılık, Alacak,
+  Müşteri ve Temsilci, Stok) üretip Power BI Desktop'ta açar; veriler kendiliğinden yüklenir, ilişkiler ve ölçüler
+  hazırdır. Windows'ta [Power BI Desktop](https://www.microsoft.com/store/productId/9NTXR16HNW1T) (ücretsiz) gerekir.
+- **Power BI paketi** (`.zip`): hazır rapor (`.pbit`) ve yıldız şema CSV'leri (`fact_satis`, `fact_alis`, `fact_cari_hareket`, `dim_cari`,
   `dim_malzeme`, `dim_tarih`, `dim_temsilci`, `dim_ambar`, `stok_bakiye`, `stok_ambar`, ABC ve hazır analiz tabloları)
   ve ilişkileri/DAX ölçülerini (brüt kâr, cari bakiye dahil) anlatan `OKUBENI_PowerBI.txt`.
   Power BI Desktop yalnızca Windows'ta çalışır.
@@ -229,6 +232,7 @@ core/logo.py           firma/dönem tarama, Logo tablolarından temiz modele akt
 core/analiz.py         ABC, trend, ölü stok, stok devir, kârlılık, cari yaşlandırma, temsilci, müşteri kaybı, sipariş önerisi, depo
 core/rapor.py          Excel raporu ve Power BI paketi
 core/pdf_ozet.py       tek sayfalık PDF yönetici özeti
+core/powerbi.py        hazır Power BI raporu (.pbit): model, ölçüler ve rapor sayfaları
 core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap, yönetici yorumu
 core/mcp_sunucu.py     Claude Desktop bağlantısı (MCP, `--mcp`)
 core/yzpaket.py        ChatGPT vb. için yapay zekâ paketi

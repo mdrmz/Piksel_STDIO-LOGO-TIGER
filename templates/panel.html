@@ -9,12 +9,14 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a class="btn" href="/indir/{{ aid }}/excel">Excel raporu</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/pdf" title="Yönetime sunulacak tek sayfalık özet">PDF özet</a>
-    <a class="btn ikincil" href="/indir/{{ aid }}/powerbi">Power BI paketi</a>
+    <button class="btn ikincil" id="pbi-btn" title="Hazır raporu Power BI Desktop ile açar (Windows)">Power BI raporu aç</button>
+    <a class="btn ikincil" href="/indir/{{ aid }}/powerbi" title="Hazır rapor + CSV dosyaları (zip)">Power BI paketi</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/yzpaket" title="ChatGPT, Claude veya Gemini sohbetine sürükleyin">Yapay zekâ paketi</a>
     {% if kaynak_acik %}<a class="btn ikincil" href="/firmalar">Başka firma</a>{% endif %}
   </div>
 </div>
 
+<div id="pbi-durum" class="uyari" style="margin-top:14px;display:none"></div>
 <div class="izgara i4" style="margin-top:20px">
   <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.net_satis|tl }} ₺</div>
     <div class="kucuk soluk">iade {{ o.iade_tutar|tl }} ₺ · {{ o.iade_orani|yuzde }}</div></div>
@@ -288,6 +290,16 @@ if (f) {
   document.getElementById('soru').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); f.requestSubmit(); } });
   document.querySelectorAll('button.hazir').forEach(b => b.onclick = () => sor(b.textContent));
 }
+const pb = document.getElementById('pbi-btn');
+if (pb) pb.onclick = async () => {
+  const dur = document.getElementById('pbi-durum'); pb.disabled = true;
+  dur.style.display = 'block'; dur.textContent = 'Power BI raporu hazırlanıyor…';
+  try {
+    const d = await (await fetch('/powerbi-ac/' + AID, {method:'POST'})).json();
+    dur.textContent = d.mesaj;
+  } catch (e) { dur.textContent = 'Rapor açılamadı: ' + e; }
+  finally { pb.disabled = false; }
+};
 const yb = document.getElementById('yorum-btn');
 if (yb) yb.onclick = async () => {
   const dur = document.getElementById('yorum-durum'); yb.disabled = true; dur.textContent = 'Yazılıyor… (30–60 sn)';
