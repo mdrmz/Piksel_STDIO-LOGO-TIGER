@@ -232,6 +232,46 @@ def test_pdf_ve_excel_yeni_sayfalar(tmp_path):
     assert ws["A4"].value == "Cari kodu" and ws["D5"].value == pytest.approx(a.cari_yaslandirma().iloc[0]["bakiye"])
 
 
+def test_powerbi_hazir_rapor(tmp_path):
+    """Hazır Power BI raporu (.pbit): model ile rapor sayfaları ve CSV dosyaları birbiriyle tutarlı olmalı.
+    (Power BI Desktop'ta açılış ayrıca elle denenir; burada dosyanın iç tutarlılığı doğrulanır.)"""
+    import json
+    import zipfile
+    from core import powerbi
+    from core.rapor import powerbi_disa_aktar
+    yol, bilgi = _gecici_analiz(tmp_path)
+    klasor = str(tmp_path / "PowerBI_test")
+    zip_yol = powerbi_disa_aktar(Analiz(yol), yol, klasor)
+    assert powerbi.RAPOR_ADI in zipfile.ZipFile(zip_yol).namelist()
+    z = zipfile.ZipFile(os.path.join(klasor, powerbi.RAPOR_ADI))
+    assert {"Version", "[Content_Types].xml", "DataModelSchema", "Report/Layout", "Settings", "Metadata"} <= set(z.namelist())
+    model = json.loads(z.read("DataModelSchema").decode("utf-16-le"))["model"]
+    rapor = json.loads(z.read("Report/Layout").decode("utf-16-le"))
+    assert json.loads(model["expressions"][0]["expression"]).rstrip("/\\") == os.path.abspath(klasor)   # veri yolu
+    kucuk = lambda x: x.replace("İ", "i").replace("I", "ı").lower()
+    alanlar, olculer = set(), []
+    for t in model["tables"]:
+        adlar = [kucuk(c["name"]) for c in t["columns"]] + [kucuk(o["name"]) for o in t.get("measures", [])]
+        assert len(adlar) == len(set(adlar)), f"{t['name']}: ad çakışması (Power BI büyük/küçük harf ayırmaz)"
+        alanlar |= {(t["name"], c["name"]) for c in t["columns"]} | {(t["name"], o["name"]) for o in t.get("measures", [])}
+        olculer += [kucuk(o["name"]) for o in t.get("measures", [])]
+        # sorgunun okuduğu CSV var ve istenen kolonları içeriyor
+        dosya, kolonlar = powerbi.T[t["name"]]
+        baslik = pd.read_csv(os.path.join(klasor, dosya), nrows=0, encoding="utf-8-sig").columns
+        assert not [c for _, c, _, _ in kolonlar if c not in baslik], dosya
+    assert len(olculer) == len(set(olculer))
+    for r in model["relationships"]:
+        assert (r["fromTable"], r["fromColumn"]) in alanlar and (r["toTable"], r["toColumn"]) in alanlar
+    assert [s["displayName"] for s in rapor["sections"]] == ["Özet", "Kârlılık", "Alacak", "Müşteri ve Temsilci", "Stok"]
+    for s in rapor["sections"]:
+        for v in s["visualContainers"]:
+            q = json.loads(v["config"])["singleVisual"]["prototypeQuery"]
+            takma = {f["Name"]: f["Entity"] for f in q["From"]}
+            for sec in q["Select"]:
+                x = sec.get("Measure") or sec.get("Column")
+                assert (takma[x["Expression"]["SourceRef"]["Source"]], x["Property"]) in alanlar, sec["Name"]
+
+
 def test_arayuz_ve_raporlar(tmp_path, monkeypatch):
     monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
     import importlib
@@ -264,6 +304,10 @@ def test_arayuz_ve_raporlar(tmp_path, monkeypatch):
     import zipfile
     adlar = set(zipfile.ZipFile(io.BytesIO(r.data)).namelist())
     assert {"fact_cari_hareket.csv", "dim_temsilci.csv", "stok_ambar.csv", "alacak_yaslandirma.csv", "karlilik_urun.csv"} <= adlar
+    assert "LogoTigerAnaliz_Rapor.pbit" in adlar
+    if sys.platform != "win32":      # Windows dışında rapor hazırlanır ama açılmaz; açıklayıcı mesaj döner
+        r = c.post(f"/powerbi-ac/{aid}").json
+        assert r["ok"] is False and "Windows" in r["mesaj"]
     r = c.get(f"/indir/{aid}/pdf")
     assert r.status_code == 200 and r.data[:5] == b"%PDF-"
     r = c.get(f"/indir/{aid}/yzpaket")

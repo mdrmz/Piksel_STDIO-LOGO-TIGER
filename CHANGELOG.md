@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## v0.5.0 — 2026-11-11
+- **Hazır Power BI raporu:** panelde **Power BI raporu aç** düğmesi. Program beş sayfalık raporu (Özet, Kârlılık,
+  Alacak, Müşteri ve Temsilci, Stok) model, ilişkiler ve ölçüleriyle birlikte kendisi üretir ve Power BI Desktop'ta
+  açar; veriler açılışta kendiliğinden yüklenir, elle tablo bağlamak gerekmez. Windows'ta Power BI Desktop
+  (ücretsiz) kurulu olmalıdır; kurulu değilse program bunu söyler.
+- Power BI paketi (zip) artık bu hazır raporu (`LogoTigerAnaliz_Rapor.pbit`) da içerir.
+
 ## v0.4.0 — 2026-11-11
 Altı yeni analiz ve PDF yönetici özeti. Hepsi `.bak` içindeki Logo tablolarından çıkar; ek veri gerekmez.
 - **Kârlılık:** ürün, müşteri ve malzeme grubu bazında tahmini brüt kâr ve marj. Maliyet, her satışa o tarihten

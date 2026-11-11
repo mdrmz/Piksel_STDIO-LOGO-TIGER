@@ -330,8 +330,22 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
     return yol
 
 
-POWERBI_OKUBENI = """Power BI'a bağlama
-==================
+POWERBI_OKUBENI = """Hazır rapor
+===========
+
+LogoTigerAnaliz_Rapor.pbit dosyasına çift tıklayın: Power BI Desktop açılır, veriler kendiliğinden yüklenir ve
+beş sayfalık rapor (Özet, Kârlılık, Alacak, Müşteri ve Temsilci, Stok) hazır gelir. İlişkiler ve ölçüler kuruludur.
+Power BI Desktop ücretsizdir ve yalnızca Windows'ta çalışır (Microsoft Store'da "Power BI Desktop").
+
+Rapor verileri, bu dosyaların programın oluşturduğu ilk klasöründen okur. Klasörü taşıdıysanız ya da başka bir
+bilgisayara kopyaladıysanız: Power BI'da Giriş > Veri dönüştürme > "Klasor" sorgusundaki yolu yeni klasörle
+değiştirin (sonunda \\ olmalı) ve Kapat ve Uygula'ya basın.
+
+Aşağıdaki bölüm, raporu sıfırdan kendiniz kurmak isterseniz gereklidir.
+
+
+Power BI'a bağlama (elle)
+=========================
 
 Bu klasördeki CSV dosyaları yıldız şemadır (UTF-8, ayraç: virgül, ondalık: nokta).
 
@@ -370,7 +384,7 @@ faturalanmamış irsaliyeler dışlanmıştır; iadeler eksi tutarlıdır.
 """
 
 
-def powerbi_disa_aktar(a: Analiz, depo: str, klasor: str) -> str:
+def powerbi_disa_aktar(a: Analiz, depo: str, klasor: str, olu_stok_gun: int = 90) -> str:
     os.makedirs(klasor, exist_ok=True)
     con = sqlite3.connect(depo)
     var = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -399,6 +413,8 @@ def powerbi_disa_aktar(a: Analiz, depo: str, klasor: str) -> str:
             df.to_csv(os.path.join(klasor, f"{ad}.csv"), index=False, encoding="utf-8-sig")
     with open(os.path.join(klasor, "OKUBENI_PowerBI.txt"), "w", encoding="utf-8") as fh:
         fh.write(POWERBI_OKUBENI)
+    from .powerbi import pbit_olustur
+    pbit_olustur(a, klasor, olu_stok_gun)   # hazır rapor: çift tıklayınca verilerle açılır
     zip_yol = klasor.rstrip("/\\") + ".zip"
     with zipfile.ZipFile(zip_yol, "w", zipfile.ZIP_DEFLATED) as z:
         for ad in sorted(os.listdir(klasor)):
