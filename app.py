@@ -297,13 +297,27 @@ def panel(aid):
     u, m, t = a.urun_abc(esik=esik), a.musteri_abc(esik=esik), a.tedarikci_abc(esik=esik)
     trend = a.aylik_trend()
     olu = a.olu_stok(bilgi.get("olu_stok_gun", 90))
-    neg = a.stok_devir()
-    neg = neg[neg["stok_miktar"] < 0]
+    olu_gun = bilgi.get("olu_stok_gun", 90)
+    kar_urun, kar_musteri = a.karlilik("malzeme"), a.karlilik("cari")
+    # en düşük marjlı ürünler: cironun anlamlı olduğu (ilk %95'lik) ürünler arasından
+    dusuk_marj = None
+    if kar_urun is not None:
+        onemli = set(u[u["sinif"].isin(["A", "B"])]["malzeme_kod"])
+        dusuk_marj = kar_urun[kar_urun["malzeme_kod"].isin(onemli)].sort_values("kar_marji").head(10)
+    alacak = a.cari_yaslandirma("alacak")
+    kayip, siparis = a.musteri_kaybi(), a.siparis_onerisi()
     return render_template(
         "panel.html", aid=aid, bilgi=bilgi, o=a.ozet(), notlar=a.veri_notlari(),
+        one_cikanlar=a.one_cikanlar(olu_gun), kar_urun=None if kar_urun is None else kar_urun.head(10),
+        kar_musteri=None if kar_musteri is None else kar_musteri.head(10), dusuk_marj=dusuk_marj,
+        cari=a.cari_ozet(), alacak=None if alacak is None else alacak.head(15),
+        temsilci=a.temsilci_performans(), kayip=kayip.head(15), kayip_say=len(kayip),
+        kayip_kesin=int((kayip["durum"] == "Kayıp").sum()), siparis=siparis.head(15), siparis_say=len(siparis),
+        siparis_acil=int((siparis["durum"] == "Acil").sum()), siparis_tutar=float(siparis["oneri_tutar"].sum()),
+        depo=a.depo_kirilim(), eski_surum=a.eski_surum,
         abc=[("Ürün", abc_ozet(u, "net_tutar")), ("Müşteri", abc_ozet(m, "net_tutar")), ("Tedarikçi", abc_ozet(t, "net_tutar"))],
         urun=u.head(15), musteri=m.head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
-        grup=a.grup_satis(), grafik=_grafik_aylik(trend), negatif_stok=len(neg), esik=esik,
+        grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
         kaynak_acik=bool(DURUM["firmalar"]), yz_hazir=yz.hazir_mi(), yz_ayar=yz.ayar(),
         yorum_html=_kayitli_yorum(klasor), gecmis=[(g["soru"], yz.md_html(g["cevap"])) for g in GECMIS.get(aid, [])])
 
@@ -417,6 +431,11 @@ def indir(aid, tur):
                 yorum = fh.read()
         excel_raporu(a, yol, bilgi.get("olu_stok_gun", 90), AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95)),
                      yorum_md=yorum)
+        return send_file(yol, as_attachment=True)
+    if tur == "pdf":
+        from core.pdf_ozet import pdf_ozeti
+        yol = os.path.join(klasor, f"Yonetici_Ozeti_{ad}.pdf")
+        pdf_ozeti(a, bilgi, yol)
         return send_file(yol, as_attachment=True)
     if tur == "yzpaket":
         from core.yzpaket import paket_olustur

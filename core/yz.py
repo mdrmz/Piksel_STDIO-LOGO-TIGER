@@ -159,6 +159,11 @@ class Maske:
             ad = str(r.cari_ad or "").strip()
             if len(ad) >= 3 and ad not in self.ileri:
                 self.ileri[ad] = f"Cari-{i:04d}"
+        # satış temsilcileri gerçek kişilerdir: adları da takma adla gider
+        for i, r in enumerate(getattr(analiz, "temsilci", pd.DataFrame()).itertuples(), start=1):
+            ad = str(getattr(r, "temsilci_ad", "") or "").strip()
+            if len(ad) >= 3 and ad not in self.ileri:
+                self.ileri[ad] = f"Temsilci-{i:02d}"
         if firma_ad and len(firma_ad) >= 3:
             self.ileri[firma_ad] = "FİRMA"
         self.geri = {v: k for k, v in self.ileri.items()}
@@ -234,6 +239,39 @@ def baglam(analiz, bilgi: dict, maske: Maske) -> str:
             k = maske.tablo(k[kol + ["bu_yil", "gecen_yil", "fark", "degisim"]])
             parcalar += [f"## Geçen yıla göre en çok düşen 10 {baslik} ({bu} vs {gecen})", _md_tablo(k, 10),
                          f"## Geçen yıla göre en çok artan 10 {baslik}", _md_tablo(k.iloc[::-1], 10)]
+    # ---- v0.4: kârlılık, cari, temsilci, müşteri kaybı, sipariş, depo
+    ku = analiz.karlilik("malzeme")
+    if ku is not None:
+        km, kg = analiz.karlilik("cari"), analiz.karlilik("grup")
+        parcalar += ["## Kârlılık (tahmini brüt kâr = net satış − satış miktarı × o tarihteki son alış fiyatı; muhasebe kârı değildir)",
+                     "En çok kâr getiren 15 ürün:\n" + _md_tablo(ku.drop(columns=["kar_payi"]), 15),
+                     "En düşük marjlı 10 ürün (net satışı 10.000 TL üzeri):\n"
+                     + _md_tablo(ku[ku["net_tutar"] > 10000].sort_values("kar_marji").drop(columns=["kar_payi"]), 10),
+                     "En çok kâr getiren 15 müşteri:\n" + _md_tablo(maske.tablo(km.drop(columns=["kar_payi"])), 15),
+                     "Malzeme grubu kârlılığı:\n" + _md_tablo(kg)]
+    co = analiz.cari_ozet()
+    if co:
+        parcalar += [f"## Cari bakiyeler ({co['ref_tarih']} itibarıyla, KDV dahil, dönem {co['donem']})",
+                     f"Müşterilerden alacak: {co['alacak']:,.0f} TL ({co['alacak_cari']} cari). "
+                     f"Yaşlandırma (gün): 0-30: {co['dilim']['g0_30']:,.0f} · 31-60: {co['dilim']['g31_60']:,.0f} · "
+                     f"61-90: {co['dilim']['g61_90']:,.0f} · 91-180: {co['dilim']['g91_180']:,.0f} · 180+: {co['dilim']['g180p']:,.0f}. "
+                     + (f"Ortalama tahsilat süresi {co['tahsilat_gun']:.0f} gün. " if co["tahsilat_gun"] is not None else "")
+                     + f"Tedarikçilere borç: {co['borc']:,.0f} TL ({co['borc_cari']} cari).",
+                     "En yüksek alacaklı 15 müşteri (ödemeler en eski kayıttan düşülmüş, FIFO):\n"
+                     + _md_tablo(maske.tablo(analiz.cari_yaslandirma("alacak")), 15)]
+    tp = analiz.temsilci_performans()
+    if tp is not None:
+        parcalar += ["## Satış temsilcisi performansı", _md_tablo(maske.tablo(tp))]
+    mk = analiz.musteri_kaybi()
+    parcalar += [f"## Müşteri kaybı ({int((mk['durum'] == 'Kayıp').sum())} kayıp, {int((mk['durum'] == 'Risk').sum())} risk) — "
+                 "kendi ortalama alım aralığının 3 katı (Kayıp) / 2 katı (Risk) süredir alım yapmayanlar", _md_tablo(maske.tablo(mk), 20)]
+    so = analiz.siparis_onerisi()
+    parcalar += [f"## Sipariş önerisi ({len(so)} ürün; stoğu 15 günden az yetecekler, 45 günlük ihtiyaca tamamlanır) — ilk 20",
+                 _md_tablo(maske.tablo(so), 20)]
+    dk = analiz.depo_kirilim()
+    if dk is not None:
+        parcalar += ["## Depo (ambar) kırılımı", _md_tablo(dk)]
+    parcalar += ["## Öne çıkanlar (kural tabanlı)", "\n".join(f"- {c}" for _, c in analiz.one_cikanlar(bilgi.get("olu_stok_gun", 90)))]
     olu = analiz.olu_stok(bilgi.get("olu_stok_gun", 90))
     parcalar += [f"## Ölü stok ({len(olu)} kalem, tahmini {olu['tahmini_deger'].sum():,.0f} TL) — ilk 15", _md_tablo(olu, 15),
                  "## Veri notları", "\n".join(f"- {k}: {maske.gizle(str(v))}" for k, v in analiz.veri_notlari())]
@@ -241,9 +279,15 @@ def baglam(analiz, bilgi: dict, maske: Maske) -> str:
 
 
 SEMA = """Analiz veritabanı (SQLite, salt-okur) tabloları:
-- fact_satis(satir_ref, donem, tarih, trcode, hareket, iocode, malzeme_ref, cari_ref, ambar, faturali, fatura_no, miktar, net_tutar, satis_temsilci_ref, iade)
+- fact_satis(satir_ref, donem, tarih, trcode, hareket, iocode, malzeme_ref, cari_ref, ambar, faturali, fatura_no, miktar, net_tutar, satis_temsilci_ref, iade, birim_maliyet, maliyet_tutar)
   Satış satırları. net_tutar KDV hariç net TL; iadelerde miktar ve net_tutar EKSİdir (iade=1). tarih 'YYYY-MM-DD HH:MM:SS'.
-- fact_alis(... fact_satis ile aynı kolonlar) Satınalma satırları; alış iadeleri eksi.
+  maliyet_tutar = miktar × o tarihteki son alış birim fiyatı (NULL olabilir). Tahmini brüt kâr = SUM(net_tutar - maliyet_tutar) WHERE maliyet_tutar IS NOT NULL.
+- fact_alis(satir_ref, donem, tarih, trcode, hareket, iocode, malzeme_ref, cari_ref, ambar, faturali, fatura_no, miktar, net_tutar, satis_temsilci_ref, iade) Satınalma satırları; alış iadeleri eksi.
+- fact_cari_hareket(hareket_ref, cari_ref, tarih, trcode, hareket, borc, alacak)  en son dönemin cari hareketleri, KDV dahil TL.
+  Cari bakiye = SUM(borc) - SUM(alacak): artı ise cari bize borçlu (alacağımız), eksi ise biz borçluyuz. trcode 14 = dönem başı devir.
+- dim_temsilci(temsilci_ref, temsilci_kod, temsilci_ad)  fact_satis.satis_temsilci_ref ile bağlanır (0 = atanmamış)
+- dim_ambar(ambar, ambar_ad) · stok_ambar(malzeme_ref, ambar, stok_miktar)  ambar bazında stok
+- malzeme_maliyet(malzeme_ref, son_giris_tarih, son_birim_maliyet, son_tedarikci_ref)
 - dim_cari(cari_ref, cari_kod, cari_ad, cari_tur, sehir, ozel_kod, yetki_kod, pasif)
 - dim_malzeme(malzeme_ref, malzeme_kod, malzeme_ad, grup_kod, ozel_kod, kart_tur, pasif)
 - dim_tarih(tarih, yil, ay, ay_ad, ceyrek, yil_ay)

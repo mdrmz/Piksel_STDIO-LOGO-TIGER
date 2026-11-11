@@ -1,40 +1,5 @@
 {% extends "base.html" %}
-{% block baslik %}{{ bilgi.firma }} {{ bilgi.firma_ad }} — Logo Tiger Analiz<script>
-const AID = "{{ aid }}";
-function kacir(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
-async function sor(soru) {
-  const kutu = document.getElementById('sohbet'), btn = document.getElementById('sor-btn');
-  kutu.insertAdjacentHTML('beforeend', `<div class="soru">${kacir(soru)}</div><div class="yz-cevap bekliyor">Düşünüyor…</div>`);
-  const hedef = kutu.lastElementChild; btn.disabled = true;
-  try {
-    const r = await fetch('/yz/sor/' + AID, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({soru})});
-    const d = await r.json();
-    hedef.classList.remove('bekliyor');
-    if (!d.ok) { hedef.innerHTML = `<p style="color:#9B1C1C">${kacir(d.hata)}</p>`; return; }
-    let ek = '';
-    if (d.sorgular.length) ek = `<details style="margin-top:6px"><summary>${d.sorgular.length} veri sorgusu kullanıldı</summary>` +
-      d.sorgular.map(q => `<pre style="white-space:pre-wrap;font-size:12px;background:#F6F7F9;padding:8px;border-radius:6px">${kacir(q.sql)}\n→ ${kacir(q.sonuc_ozet)}</pre>`).join('') + '</details>';
-    hedef.innerHTML = d.html + ek;
-  } catch (e) { hedef.innerHTML = `<p style="color:#9B1C1C">Bağlantı hatası: ${kacir(String(e))}</p>`; }
-  finally { btn.disabled = false; }
-}
-const f = document.getElementById('sor-form');
-if (f) {
-  f.onsubmit = e => { e.preventDefault(); const t = document.getElementById('soru'); const q = t.value.trim(); if (!q) return; t.value = ''; sor(q); };
-  document.getElementById('soru').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); f.requestSubmit(); } });
-  document.querySelectorAll('button.hazir').forEach(b => b.onclick = () => sor(b.textContent));
-}
-const yb = document.getElementById('yorum-btn');
-if (yb) yb.onclick = async () => {
-  const dur = document.getElementById('yorum-durum'); yb.disabled = true; dur.textContent = 'Yazılıyor… (30–60 sn)';
-  try {
-    const r = await fetch('/yz/yorum/' + AID, {method:'POST'}); const d = await r.json();
-    if (!d.ok) { dur.textContent = d.hata; dur.style.color = '#9B1C1C'; return; }
-    document.getElementById('yorum').innerHTML = d.html; dur.textContent = 'Excel raporuna eklendi.'; yb.textContent = 'Yeniden oluştur';
-  } finally { yb.disabled = false; }
-};
-</script>
-{% endblock %}
+{% block baslik %}{{ bilgi.firma }} {{ bilgi.firma_ad }} — Logo Tiger Analiz{% endblock %}
 {% block icerik %}
 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
   <div>
@@ -43,6 +8,7 @@ if (yb) yb.onclick = async () => {
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a class="btn" href="/indir/{{ aid }}/excel">Excel raporu</a>
+    <a class="btn ikincil" href="/indir/{{ aid }}/pdf" title="Yönetime sunulacak tek sayfalık özet">PDF özet</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/powerbi">Power BI paketi</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/yzpaket" title="ChatGPT, Claude veya Gemini sohbetine sürükleyin">Yapay zekâ paketi</a>
     {% if kaynak_acik %}<a class="btn ikincil" href="/firmalar">Başka firma</a>{% endif %}
@@ -60,9 +26,34 @@ if (yb) yb.onclick = async () => {
     <div class="kucuk soluk">{{ o.tedarikci_sayisi }} tedarikçi</div></div>
 </div>
 
-{% if negatif_stok %}
-<div class="uyari" style="margin-top:16px">{{ negatif_stok }} malzemede stok bakiyesi eksi görünüyor. Bu genelde Logo'da girilmemiş alış ya da sayım fişine işaret eder; Excel raporunun "Stok Devir" sayfasında listelenir.</div>
+{% if eski_surum %}
+<div class="uyari" style="margin-top:16px">Bu analiz programın önceki sürümüyle oluşturulmuş. Kârlılık, alacak yaşlandırma ve depo
+  bilgileri için Logo yedeğini yeniden seçip analizi baştan oluşturun.</div>
 {% endif %}
+<div class="izgara i4" style="margin-top:16px">
+  <div class="kart kpi"><div class="ad">Tahmini brüt kâr</div>
+    {% if o.brut_kar is not none %}<div class="deger">{{ o.brut_kar|tl }} ₺</div>
+    <div class="kucuk soluk">marj {{ o.kar_marji|yuzde }} · son alış maliyetiyle</div>
+    {% else %}<div class="deger">–</div><div class="kucuk soluk">maliyet verisi yok</div>{% endif %}</div>
+  <div class="kart kpi"><div class="ad">Müşterilerden alacak (KDV dahil)</div>
+    {% if cari %}<div class="deger">{{ cari.alacak|tl }} ₺</div>
+    <div class="kucuk soluk">60 günü aşan {{ cari.gecikmis|tl }} ₺{% if cari.tahsilat_gun is not none %} · tahsilat {{ cari.tahsilat_gun|round|int }} gün{% endif %}</div>
+    {% else %}<div class="deger">–</div><div class="kucuk soluk">yedekte cari hareket tablosu yok</div>{% endif %}</div>
+  <div class="kart kpi"><div class="ad">Kaybedilen müşteri</div><div class="deger">{{ kayip_kesin }}</div>
+    <div class="kucuk soluk">{{ kayip_say - kayip_kesin }} müşteri risk altında</div></div>
+  <div class="kart kpi"><div class="ad">Sipariş gereken ürün</div><div class="deger">{{ siparis_say }}</div>
+    <div class="kucuk soluk">{{ siparis_acil }} acil{% if siparis_tutar %} · ~{{ siparis_tutar|tl }} ₺{% endif %}</div></div>
+</div>
+
+{% if one_cikanlar %}
+<h2>Öne çıkanlar</h2>
+<div class="kart" style="padding:10px 18px">
+  {% for seviye, cumle in one_cikanlar %}
+  <div class="one {{ seviye }}">{{ cumle }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
 
 <h2>Yapay zekâya sor</h2>
 <div class="kart">
@@ -75,7 +66,7 @@ if (yb) yb.onclick = async () => {
     <button class="btn" id="sor-btn">Sor</button>
   </form>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" id="hazir-sorular">
-    {% for q in ["Firmanın genel durumunu 5 maddede özetle", "Geçen yıla göre en çok düşen 5 müşteri kim, ne yapmalıyız?", "Müşteri yoğunlaşma riski var mı?", "Ölü stok için eritme planı öner"] %}
+    {% for q in ["Firmanın genel durumunu 5 maddede özetle", "Geçen yıla göre en çok düşen 5 müşteri kim, ne yapmalıyız?", "En düşük marjlı ürünlerde ne yapmalıyız?", "Hangi alacakları önce tahsil etmeliyiz?", "Ölü stok için eritme planı öner"] %}
       <button type="button" class="btn kucuk ikincil hazir">{{ q }}</button>{% endfor %}
   </div>
   <p class="kucuk soluk" style="margin:10px 0 0">{{ yz_ayar.saglayici }} · {{ yz_ayar.model }} ·
@@ -162,6 +153,111 @@ if (yb) yb.onclick = async () => {
     </table></div>
   </div>
 </div>
+
+{% if kar_urun is not none %}
+<h2>Kârlılık <span class="soluk kucuk">(tahmini brüt kâr = net satış − son alış maliyeti)</span></h2>
+<div class="izgara i2">
+  <div class="kart" style="padding:8px 12px"><h3 style="margin:6px 8px">En çok kâr getiren 10 ürün</h3><table>
+    <tr><th>Malzeme</th><th class="s">Net satış</th><th class="s">Brüt kâr</th><th class="s">Marj</th></tr>
+    {% for r in kar_urun.itertuples() %}
+    <tr><td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }} · {{ r.grup_kod }}</div></td>
+        <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.brut_kar|tl }}</td><td class="s">{{ r.kar_marji|yuzde }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <div class="kart" style="padding:8px 12px"><h3 style="margin:6px 8px">En çok kâr getiren 10 müşteri</h3><table>
+    <tr><th>Müşteri</th><th class="s">Net satış</th><th class="s">Brüt kâr</th><th class="s">Marj</th></tr>
+    {% for r in kar_musteri.itertuples() %}
+    <tr><td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }}</div></td>
+        <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.brut_kar|tl }}</td><td class="s">{{ r.kar_marji|yuzde }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% if dusuk_marj is not none and dusuk_marj|length %}
+<div class="kart" style="padding:8px 12px;margin-top:16px"><h3 style="margin:6px 8px">En düşük marjlı 10 ürün <span class="soluk kucuk">(A ve B sınıfı ürünler arasında)</span></h3><table>
+  <tr><th>Malzeme</th><th class="s">Net satış</th><th class="s">Maliyet</th><th class="s">Brüt kâr</th><th class="s">Marj</th></tr>
+  {% for r in dusuk_marj.itertuples() %}
+  <tr><td>{{ r.malzeme_ad }}<span class="kucuk soluk"> · {{ r.malzeme_kod }}</span></td><td class="s">{{ r.net_tutar|tl }}</td>
+      <td class="s">{{ r.maliyet|tl }}</td><td class="s">{{ r.brut_kar|tl }}</td><td class="s">{{ r.kar_marji|yuzde }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+{% endif %}
+
+{% if cari %}
+<h2>Alacak yaşlandırma <span class="soluk kucuk">({{ cari.alacak_cari }} müşteri · {{ cari.alacak|tl }} ₺ · KDV dahil · {{ cari.ref_tarih }} itibarıyla)</span></h2>
+<div class="kart" style="padding:8px 12px">
+  <div class="izgara" style="grid-template-columns:repeat(5,1fr);gap:8px;padding:6px 8px 12px">
+    {% for ad, anahtar in [("0-30 gün","g0_30"),("31-60 gün","g31_60"),("61-90 gün","g61_90"),("91-180 gün","g91_180"),("180+ gün","g180p")] %}
+    <div><div class="kucuk soluk">{{ ad }}</div><div style="font-weight:600;font-variant-numeric:tabular-nums{% if loop.index > 2 %};color:var(--c-y){% endif %}">{{ cari.dilim[anahtar]|tl }} ₺</div></div>
+    {% endfor %}
+  </div>
+  <table>
+    <tr><th>Müşteri</th><th class="s">Bakiye</th><th class="s">0-30</th><th class="s">31-60</th><th class="s">61-90</th><th class="s">91-180</th><th class="s">180+</th><th class="s">En eski (gün)</th></tr>
+    {% for r in alacak.itertuples() %}
+    <tr><td>{{ r.cari_ad }}<span class="kucuk soluk"> · {{ r.cari_kod }}</span></td><td class="s"><b>{{ r.bakiye|tl }}</b></td>
+        <td class="s">{{ r.g0_30|tl }}</td><td class="s">{{ r.g31_60|tl }}</td><td class="s">{{ r.g61_90|tl }}</td>
+        <td class="s">{{ r.g91_180|tl }}</td><td class="s">{{ r.g180p|tl }}</td><td class="s">{{ r.en_eski_gun|int }}</td></tr>
+    {% else %}<tr><td colspan="8" class="soluk">Açık alacak yok.</td></tr>{% endfor %}
+  </table>
+  <p class="kucuk soluk" style="margin:10px 8px 4px">İlk 15 müşteri. Ödemeler en eski kayıttan düşülür; kalan açık tutar hareket tarihine göre yaşlandırılır.
+    Tedarikçilere borç: {{ cari.borc|tl }} ₺ ({{ cari.borc_cari }} cari). Tüm liste Excel raporunda.</p>
+</div>
+{% endif %}
+
+<div class="izgara i2">
+  <div>
+    <h2>Müşteri kaybı <span class="soluk kucuk">({{ kayip_kesin }} kayıp · {{ kayip_say - kayip_kesin }} risk)</span></h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th></th><th>Müşteri</th><th class="s">Son alım</th><th class="s">Sessiz (gün)</th><th class="s">Son 12 ay</th></tr>
+      {% for r in kayip.itertuples() %}
+      <tr><td><span class="rozet {{ 'rC' if r.durum == 'Kayıp' else 'rB' }}">{{ r.durum }}</span></td>
+          <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.alim_sayisi }} alım · ort. {{ r.ort_aralik_gun|round|int }} günde bir</div></td>
+          <td class="s">{{ r.son_alim }}</td><td class="s">{{ r.sessiz_gun }}</td><td class="s">{{ r.son_12_ay|tl }}</td></tr>
+      {% else %}<tr><td colspan="5" class="soluk">Kayıp ya da risk altında müşteri görünmüyor.</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  <div>
+    <h2>Sipariş önerisi <span class="soluk kucuk">({{ siparis_say }} ürün{% if siparis_tutar %} · ~{{ siparis_tutar|tl }} ₺{% endif %})</span></h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th></th><th>Malzeme</th><th class="s">Stok</th><th class="s">Yeter (gün)</th><th class="s">Öneri</th></tr>
+      {% for r in siparis.itertuples() %}
+      <tr><td><span class="rozet {{ 'rC' if r.durum == 'Acil' else 'rB' }}">{{ r.durum }}</span></td>
+          <td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }}{% if r.son_tedarikci == r.son_tedarikci and r.son_tedarikci %} · {{ r.son_tedarikci }}{% endif %}</div></td>
+          <td class="s">{{ r.stok_miktar|tl }}</td><td class="s">{{ r.stok_gun|round|int }}</td><td class="s"><b>{{ r.oneri_miktar|tl }}</b></td></tr>
+      {% else %}<tr><td colspan="5" class="soluk">Sipariş gerektiren malzeme görünmüyor.</td></tr>{% endfor %}
+    </table>
+    <p class="kucuk soluk" style="margin:10px 8px 4px">Son 90 günün satış hızına göre stoğu 15 günden az yetecek ürünler; öneri 45 günlük ihtiyaca tamamlar.</p></div>
+  </div>
+</div>
+
+{% if temsilci is not none or depo is not none %}
+<div class="izgara {{ 'i2' if temsilci is not none and depo is not none else '' }}">
+  {% if temsilci is not none %}
+  <div>
+    <h2>Satış temsilcileri</h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th>Temsilci</th><th class="s">Net satış</th><th class="s">Pay</th><th class="s">Müşteri</th><th class="s">Marj</th></tr>
+      {% for r in temsilci.itertuples() %}
+      <tr><td>{{ r.temsilci_ad }}<span class="kucuk soluk"> {{ r.temsilci_kod }}</span></td><td class="s">{{ r.net_tutar|tl }}</td>
+          <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.musteri_sayisi }}</td><td class="s">{{ r.kar_marji|yuzde }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+  {% endif %}
+  {% if depo is not none %}
+  <div>
+    <h2>Depo (ambar) kırılımı</h2>
+    <div class="kart" style="padding:8px 12px"><table>
+      <tr><th>Ambar</th><th class="s">Net satış</th><th class="s">Pay</th><th class="s">Stok kalemi</th><th class="s">Stok değeri</th></tr>
+      {% for r in depo.itertuples() %}
+      <tr><td>{{ r.ambar_ad }}<span class="kucuk soluk"> {{ r.ambar }}</span></td><td class="s">{{ r.net_tutar|tl }}</td>
+          <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.stok_kalem|int }}</td><td class="s">{{ r.stok_deger|tl }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <h2>Veri notları</h2>
 <div class="kart" style="padding:8px 12px"><table>

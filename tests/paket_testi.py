@@ -68,9 +68,10 @@ def main():
         assert "MÜŞTERİ 150 TİC. LTD. ŞTİ.".encode("utf-8") in panel, "panelde Türkçe müşteri adı yok"
         assert "45.995.309".encode() in panel, "net satış panelde beklenen değerde değil"
 
-        for tur in ("excel", "powerbi", "yzpaket"):
+        assert "Alacak yaşlandırma".encode("utf-8") in panel and "Kârlılık".encode("utf-8") in panel
+        for tur in ("excel", "powerbi", "yzpaket", "pdf"):
             durum, veri, _ = istek(f"/indir/{aid}/{tur}")
-            assert durum == 200 and veri[:2] == b"PK", tur
+            assert durum == 200 and veri[:5] == (b"%PDF-" if tur == "pdf" else veri[:5]) and veri[:2] in (b"PK", b"%P"), tur
             print(f"  {tur}: {len(veri) / 1024:.0f} KB", flush=True)
         durum, veri, _ = istek("/tanilama")
         assert durum == 200 and veri[:2] == b"PK"

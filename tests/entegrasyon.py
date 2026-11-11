@@ -136,6 +136,17 @@ def main():
     for anahtar in ("net_satis", "net_alis", "iade_tutar", "fatura_sayisi", "musteri_sayisi", "urun_sayisi"):
         print(f"  {anahtar:16} SQL Server: {o1[anahtar]:>16,.2f}   demo: {o2[anahtar]:>16,.2f}")
         assert abs(o1[anahtar] - o2[anahtar]) < 0.05, anahtar
+    # v0.4: maliyet, cari hareket, temsilci ve ambar tabloları da SQL Server'dan aynı gelmeli
+    assert abs(o1["brut_kar"] - o2["brut_kar"]) < 0.05, "brut_kar"
+    c1, c2 = a_sql.cari_ozet(), a_ref.cari_ozet()
+    for anahtar in ("alacak", "borc", "gecikmis"):
+        print(f"  {anahtar:16} SQL Server: {c1[anahtar]:>16,.2f}   demo: {c2[anahtar]:>16,.2f}")
+        assert abs(c1[anahtar] - c2[anahtar]) < 0.05, anahtar
+    t1 = a_sql.temsilci_performans()
+    assert t1["temsilci_ad"].tolist() == a_ref.temsilci_performans()["temsilci_ad"].tolist()
+    assert "ŞAHİN" not in " ".join(t1["temsilci_ad"]) and "ÇELİK" in " ".join(t1["temsilci_ad"]), "temsilci adları bozuk"
+    assert a_sql.depo_kirilim()["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+    assert c.get(f"/indir/{aid}/pdf").status_code == 200
     u1, u2 = a_sql.urun_abc(), a_ref.urun_abc()
     assert u1["sinif"].value_counts().to_dict() == u2["sinif"].value_counts().to_dict()
     m1 = a_sql.musteri_abc()

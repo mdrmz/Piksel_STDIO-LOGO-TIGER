@@ -39,8 +39,23 @@ def abc_ozet(t: pd.DataFrame, deger: str) -> pd.DataFrame:
     return o.reset_index()
 
 
+def _bir_kez(fn):
+    """Aynı parametrelerle tekrar çağrılan analizleri bir kez hesaplar (panel, Excel ve PDF aynı tabloları
+    birkaç kez ister). Dönen tablo paylaşılır; çağıranlar yerinde değiştirmemelidir."""
+    import functools
+
+    @functools.wraps(fn)
+    def sarili(self, *a, **k):
+        anahtar = (fn.__name__, a, tuple(sorted(k.items())))
+        if anahtar not in self._onbellek:
+            self._onbellek[anahtar] = fn(self, *a, **k)
+        return self._onbellek[anahtar]
+    return sarili
+
+
 class Analiz:
     def __init__(self, depo: str):
+        self._onbellek: dict = {}
         self.con = sqlite3.connect(depo)
         q = lambda s: pd.read_sql_query(s, self.con)
         self.meta = dict(q("SELECT anahtar, deger FROM meta").values)
@@ -53,6 +68,18 @@ class Analiz:
             d["tarih"] = pd.to_datetime(d["tarih"])
             d["iade"] = d["iade"].astype(bool)
             d["faturali"] = d["faturali"].astype(bool)
+        # v0.4 ile gelen tablolar: eski sürümle oluşturulmuş analizlerde yoktur -> boş kabul edilir
+        var = {r[0] for r in self.con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        ops = lambda t, kolonlar: q(f"SELECT * FROM {t}") if t in var else pd.DataFrame(columns=kolonlar)
+        self.cari_hareket = ops("fact_cari_hareket", ["hareket_ref", "cari_ref", "tarih", "trcode", "hareket", "borc", "alacak"])
+        self.cari_hareket["tarih"] = pd.to_datetime(self.cari_hareket["tarih"])
+        self.temsilci = ops("dim_temsilci", ["temsilci_ref", "temsilci_kod", "temsilci_ad"])
+        self.ambar = ops("dim_ambar", ["ambar", "ambar_ad"])
+        self.stok_ambar = ops("stok_ambar", ["malzeme_ref", "ambar", "stok_miktar"])
+        self.maliyet = ops("malzeme_maliyet", ["malzeme_ref", "son_giris_tarih", "son_birim_maliyet", "son_tedarikci_ref"])
+        self.maliyet_var = "maliyet_tutar" in self.satis.columns and self.satis["maliyet_tutar"].notna().any()
+        self.ref_tarih = self.satis["tarih"].max()   # "bugün": verideki son satış tarihi
+        self.eski_surum = "malzeme_maliyet" not in var   # v0.4 öncesi oluşturulmuş: kârlılık/cari/depo verisi yok
 
     # ------------------------------------------------------------------ özet
     def ozet(self) -> dict:
@@ -73,7 +100,19 @@ class Analiz:
             "tedarikci_sayisi": int(self.alis["cari_ref"].nunique()),
             "tarih_bas": self.meta.get("tarih_bas", ""),
             "tarih_bit": self.meta.get("tarih_bit", ""),
+            **self._kar_ozeti(),
         }
+
+    def _kar_ozeti(self) -> dict:
+        """Maliyeti bilinen satışlar üzerinden tahmini brüt kâr. Maliyet yoksa değerler None."""
+        if not self.maliyet_var:
+            return {"brut_kar": None, "kar_marji": None, "maliyet_kapsama": 0.0}
+        s = self.satis[self.satis["maliyet_tutar"].notna()]
+        ciro = float(s["net_tutar"].sum())
+        kar = float(ciro - s["maliyet_tutar"].sum())
+        toplam = float(self.satis["net_tutar"].sum())
+        return {"brut_kar": kar, "kar_marji": kar / ciro if ciro else None,
+                "maliyet_kapsama": ciro / toplam if toplam else 0.0}
 
     # ------------------------------------------------------------------ ABC
     def urun_abc(self, olcut="net_tutar", esik=None):
@@ -175,6 +214,274 @@ class Analiz:
         t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad"]], on="malzeme_ref", how="left")
         return t[["malzeme_kod", "malzeme_ad", "stok_miktar", "yillik_satis", "devir_hizi", "stok_gun"]]
 
+    # ------------------------------------------------------------------ kârlılık
+    @_bir_kez
+    def karlilik(self, seviye: str = "malzeme"):
+        """Tahmini brüt kâr = net satış − (satış miktarı × o tarihteki son alış birim maliyeti).
+        seviye: "malzeme", "cari" veya "grup". Maliyet bilgisi yoksa None döner.
+        Maliyeti bulunamayan satırlar (hiç alışı/devri olmayan malzemeler) hesaba girmez."""
+        if not self.maliyet_var:
+            return None
+        s = self.satis[self.satis["maliyet_tutar"].notna()]
+        if seviye == "grup":
+            s = s.merge(self.malzeme[["malzeme_ref", "grup_kod"]], on="malzeme_ref", how="left")
+            s["grup_kod"] = s["grup_kod"].replace("", "(grupsuz)").fillna("(grupsuz)")
+        anahtar = {"malzeme": "malzeme_ref", "cari": "cari_ref", "grup": "grup_kod"}[seviye]
+        t = s.groupby(anahtar, as_index=False).agg(net_tutar=("net_tutar", "sum"), maliyet=("maliyet_tutar", "sum"),
+                                                   toplam_miktar=("miktar", "sum"))
+        t["brut_kar"] = t["net_tutar"] - t["maliyet"]
+        t["kar_marji"] = t["brut_kar"] / t["net_tutar"].where(t["net_tutar"] > 0)
+        toplam_kar = t["brut_kar"].sum()
+        t["kar_payi"] = t["brut_kar"] / toplam_kar if toplam_kar else 0.0
+        t = t.sort_values("brut_kar", ascending=False, kind="mergesort").reset_index(drop=True)
+        t.insert(0, "sira", np.arange(1, len(t) + 1))
+        if seviye == "malzeme":
+            t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
+            cols = ["sira", "malzeme_kod", "malzeme_ad", "grup_kod", "toplam_miktar"]
+        elif seviye == "cari":
+            t = t.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")
+            cols = ["sira", "cari_kod", "cari_ad", "sehir"]
+        else:
+            cols = ["sira", "grup_kod"]
+        return t[cols + ["net_tutar", "maliyet", "brut_kar", "kar_marji", "kar_payi"]]
+
+    # ------------------------------------------------------------------ cari bakiye ve yaşlandırma
+    YAS_DILIM = [(0, 30, "g0_30"), (31, 60, "g31_60"), (61, 90, "g61_90"), (91, 180, "g91_180"), (181, 10 ** 6, "g180p")]
+
+    @_bir_kez
+    def cari_yaslandirma(self, yon: str = "alacak"):
+        """Açık cari bakiyelerin yaşlandırması (FIFO): ödemeler en eski borçtan başlayarak düşülür,
+        kalan açık tutarlar hareket tarihine göre 0-30 / 31-60 / 61-90 / 91-180 / 180+ gün dilimlerine dağıtılır.
+        yon="alacak": bize borçlu cariler (alacaklarımız) · yon="borc": borçlu olduğumuz cariler.
+        Cari hareket tablosu (CLFLINE) yedekte yoksa None döner.
+        Not: dönem başı devir (açılış) fişi önceki bakiyeyi tek satırda taşır; o tutar dönem başı tarihiyle yaşlanır."""
+        h = self.cari_hareket
+        if h.empty:
+            return None
+        h = h[h["tarih"].notna()]
+        ref = max(h["tarih"].max(), self.ref_tarih) if pd.notna(self.ref_tarih) else h["tarih"].max()
+        # alacak yönünde "açan" taraf borç, "kapatan" taraf alacak kolonudur; borç yönünde tersi
+        acan, kapatan = ("borc", "alacak") if yon == "alacak" else ("alacak", "borc")
+        top = h.groupby("cari_ref").agg(_acan=(acan, "sum"), _kapatan=(kapatan, "sum"))
+        top["bakiye"] = top["_acan"] - top["_kapatan"]
+        top = top[top["bakiye"] > 0.005]
+        if top.empty:
+            return pd.DataFrame(columns=["cari_kod", "cari_ad", "sehir", "bakiye"] + [d[2] for d in self.YAS_DILIM]
+                                + ["en_eski_gun", "gecikmis_pay"])
+        a = h[h["cari_ref"].isin(top.index) & (h[acan] > 0)].sort_values(["cari_ref", "tarih", "hareket_ref"], kind="mergesort")
+        a = a.assign(_kum=a.groupby("cari_ref")[acan].cumsum())
+        a["_kapatan"] = a["cari_ref"].map(top["_kapatan"])
+        a["acik"] = (a["_kum"] - a["_kapatan"]).clip(lower=0).clip(upper=a[acan])
+        a = a[a["acik"] > 0.005].copy()
+        a["gun"] = (ref - a["tarih"]).dt.days.clip(lower=0)
+        for alt, ust, ad in self.YAS_DILIM:
+            a[ad] = np.where(a["gun"].between(alt, ust), a["acik"], 0.0)
+        t = a.groupby("cari_ref").agg(**{d[2]: (d[2], "sum") for d in self.YAS_DILIM}, en_eski_gun=("gun", "max"))
+        t = t.join(top["bakiye"]).reset_index()
+        t["gecikmis_pay"] = (t["g61_90"] + t["g91_180"] + t["g180p"]) / t["bakiye"]
+        t = t.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")
+        t = t.sort_values("bakiye", ascending=False, kind="mergesort").reset_index(drop=True)
+        t.attrs["ref_tarih"] = str(ref.date())
+        return t[["cari_kod", "cari_ad", "sehir", "bakiye"] + [d[2] for d in self.YAS_DILIM] + ["en_eski_gun", "gecikmis_pay"]]
+
+    @_bir_kez
+    def cari_ozet(self):
+        """Toplam alacak/borç, dilim toplamları ve ortalama tahsilat süresi (gün). CLFLINE yoksa None."""
+        al = self.cari_yaslandirma("alacak")
+        if al is None:
+            return None
+        bo = self.cari_yaslandirma("borc")
+        h = self.cari_hareket[self.cari_hareket["tarih"].notna()]
+        # ortalama tahsilat süresi = alacak bakiyesi / günlük ortalama faturalama (devir hariç, KDV dahil borç kayıtları)
+        musteri = set(self.satis["cari_ref"].unique())
+        f = h[(h["trcode"] != 14) & h["cari_ref"].isin(musteri)]
+        gun = max(1, (h["tarih"].max() - h.loc[h["trcode"] != 14, "tarih"].min()).days + 1) if len(f) else 1
+        gunluk = f["borc"].sum() / gun
+        toplam_al = float(al["bakiye"].sum())
+        return {
+            "alacak": toplam_al, "alacak_cari": int(len(al)),
+            "borc": float(bo["bakiye"].sum()), "borc_cari": int(len(bo)),
+            "dilim": {d[2]: float(al[d[2]].sum()) for d in self.YAS_DILIM},
+            "gecikmis": float(al[["g61_90", "g91_180", "g180p"]].sum().sum()),
+            "tahsilat_gun": float(toplam_al / gunluk) if gunluk > 0 else None,
+            "ref_tarih": al.attrs.get("ref_tarih", ""), "donem": self.meta.get("cari_hareket_donemi", ""),
+        }
+
+    # ------------------------------------------------------------------ satış temsilcisi
+    @_bir_kez
+    def temsilci_performans(self):
+        """Satış elemanı bazında satış, iade, müşteri ve tahmini kâr. Veride temsilci bilgisi yoksa None."""
+        s = self.satis
+        if "satis_temsilci_ref" not in s.columns or s["satis_temsilci_ref"].fillna(0).astype(int).nunique() < 2:
+            return None
+        s = s.assign(temsilci_ref=s["satis_temsilci_ref"].fillna(0).astype(int),
+                     _iade=np.where(s["iade"], -s["net_tutar"], 0.0),
+                     _mal=s["maliyet_tutar"] if "maliyet_tutar" in s.columns else np.nan)
+        t = s.groupby("temsilci_ref", as_index=False).agg(
+            net_tutar=("net_tutar", "sum"), iade_tutar=("_iade", "sum"), musteri_sayisi=("cari_ref", "nunique"),
+            maliyet=("_mal", lambda x: x.sum(min_count=1)))
+        fat = s[~s["iade"]].groupby("temsilci_ref")["fatura_no"].nunique().rename("fatura_sayisi")
+        t = t.merge(fat, on="temsilci_ref", how="left").fillna({"fatura_sayisi": 0})
+        t["ortalama_fatura"] = (t["net_tutar"] + t["iade_tutar"]) / t["fatura_sayisi"].where(t["fatura_sayisi"] > 0)
+        t["iade_orani"] = t["iade_tutar"] / (t["net_tutar"] + t["iade_tutar"]).where((t["net_tutar"] + t["iade_tutar"]) > 0)
+        t["pay"] = t["net_tutar"] / t["net_tutar"].sum()
+        kms = s[s["_mal"].notna()].groupby("temsilci_ref")["net_tutar"].sum().rename("_km")
+        t = t.merge(kms, on="temsilci_ref", how="left")
+        t["brut_kar"] = t["_km"] - t["maliyet"]
+        t["kar_marji"] = t["brut_kar"] / t["_km"].where(t["_km"] > 0)
+        t = t.merge(self.temsilci, on="temsilci_ref", how="left")
+        t["temsilci_ad"] = np.where(t["temsilci_ref"] == 0, "(temsilci atanmamış)",
+                                    t["temsilci_ad"].fillna("").replace("", np.nan).fillna("Temsilci " + t["temsilci_ref"].astype(str)))
+        t["temsilci_kod"] = t["temsilci_kod"].fillna("")
+        t = t.sort_values("net_tutar", ascending=False, kind="mergesort").reset_index(drop=True)
+        return t[["temsilci_kod", "temsilci_ad", "net_tutar", "pay", "fatura_sayisi", "ortalama_fatura", "musteri_sayisi",
+                  "iade_tutar", "iade_orani", "brut_kar", "kar_marji"]]
+
+    # ------------------------------------------------------------------ müşteri kaybı
+    @_bir_kez
+    def musteri_kaybi(self, en_az_alim: int = 3):
+        """Düzenli alırken alımı kesilen/seyrekleşen müşteriler.
+        Bir müşterinin kendi ortalama alım aralığına bakılır (en az `en_az_alim` ayrı alım günü olanlar):
+          Kayıp: son alımından bu yana, ortalama aralığının 3 katından (en az 60 gün) uzun süre geçmiş
+          Risk : 2 katından (en az 30 gün) uzun süre geçmiş
+        Referans tarih verideki son satış tarihidir."""
+        s = self.satis[~self.satis["iade"] & self.satis["tarih"].notna()]
+        g = s.assign(gun=s["tarih"].dt.normalize()).groupby("cari_ref").agg(
+            alim_sayisi=("gun", "nunique"), ilk_alim=("gun", "min"), son_alim=("gun", "max"))
+        g = g[g["alim_sayisi"] >= en_az_alim].copy()
+        g["ort_aralik_gun"] = (g["son_alim"] - g["ilk_alim"]).dt.days / (g["alim_sayisi"] - 1)
+        g["sessiz_gun"] = (self.ref_tarih.normalize() - g["son_alim"]).dt.days
+        kayip = g["sessiz_gun"] >= np.maximum(60, 3 * g["ort_aralik_gun"])
+        risk = g["sessiz_gun"] >= np.maximum(30, 2 * g["ort_aralik_gun"])
+        g["durum"] = np.where(kayip, "Kayıp", np.where(risk, "Risk", ""))
+        g = g[g["durum"] != ""].reset_index()
+        ciro = self.satis.groupby("cari_ref")["net_tutar"].sum().rename("net_tutar")
+        son12 = self.satis[self.satis["tarih"] > self.ref_tarih - pd.DateOffset(years=1)].groupby("cari_ref")["net_tutar"].sum().rename("son_12_ay")
+        g = g.merge(ciro, on="cari_ref", how="left").merge(son12, on="cari_ref", how="left").fillna({"son_12_ay": 0.0})
+        g = g.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")
+        g["son_alim"] = g["son_alim"].dt.date
+        g["_s"] = (g["durum"] != "Kayıp").astype(int)
+        g = g.sort_values(["_s", "net_tutar"], ascending=[True, False], kind="mergesort").reset_index(drop=True)
+        return g[["durum", "cari_kod", "cari_ad", "sehir", "alim_sayisi", "ort_aralik_gun", "son_alim", "sessiz_gun",
+                  "net_tutar", "son_12_ay"]]
+
+    # ------------------------------------------------------------------ sipariş önerisi
+    @_bir_kez
+    def siparis_onerisi(self, tedarik_gun: int = 15, hedef_gun: int = 45, pencere_gun: int = 90):
+        """Stoğu, tedarik süresinden (`tedarik_gun`) kısa sürede bitecek malzemeler için sipariş miktarı önerir.
+        Günlük satış hızı son `pencere_gun` günün satışından hesaplanır; öneri stoğu `hedef_gun` günlük
+        ihtiyaca tamamlar. Durum: "Acil" = stok bitmiş ya da 7 günden az · "Sipariş ver" = tedarik süresinden az."""
+        bas = self.ref_tarih - pd.Timedelta(days=pencere_gun)
+        son = self.satis[self.satis["tarih"] > bas]
+        hiz = (son.groupby("malzeme_ref")["miktar"].sum() / pencere_gun).rename("gunluk_satis")
+        t = hiz[hiz > 0].to_frame().join(self.stok.set_index("malzeme_ref")["stok_miktar"], how="left").fillna({"stok_miktar": 0.0})
+        t["stok_gun"] = t["stok_miktar"].clip(lower=0) / t["gunluk_satis"]
+        t = t[t["stok_gun"] < tedarik_gun].copy()
+        t["oneri_miktar"] = np.ceil(t["gunluk_satis"] * hedef_gun - t["stok_miktar"].clip(lower=0))
+        t = t[t["oneri_miktar"] > 0].reset_index()
+        t["durum"] = np.where(t["stok_gun"] < 7, "Acil", "Sipariş ver")
+        m = self.maliyet[["malzeme_ref", "son_birim_maliyet", "son_tedarikci_ref"]] if len(self.maliyet) else \
+            pd.DataFrame(columns=["malzeme_ref", "son_birim_maliyet", "son_tedarikci_ref"])
+        t = t.merge(m, on="malzeme_ref", how="left")
+        t["oneri_tutar"] = t["oneri_miktar"] * pd.to_numeric(t["son_birim_maliyet"], errors="coerce")
+        ted = self.cari[["cari_ref", "cari_ad"]].rename(columns={"cari_ref": "son_tedarikci_ref", "cari_ad": "son_tedarikci"})
+        t = t.merge(ted, on="son_tedarikci_ref", how="left")
+        t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
+        t["_s"] = (t["durum"] != "Acil").astype(int)
+        t = t.sort_values(["_s", "oneri_tutar"], ascending=[True, False], na_position="last", kind="mergesort").reset_index(drop=True)
+        return t[["durum", "malzeme_kod", "malzeme_ad", "grup_kod", "stok_miktar", "gunluk_satis", "stok_gun",
+                  "oneri_miktar", "son_birim_maliyet", "oneri_tutar", "son_tedarikci"]]
+
+    # ------------------------------------------------------------------ depo (ambar) kırılımı
+    @_bir_kez
+    def depo_kirilim(self):
+        """Ambar bazında satış ve stok. Tek ambarla çalışan firmalarda None döner."""
+        s = self.satis
+        ambarlar = set(pd.to_numeric(s["ambar"], errors="coerce").fillna(0).astype(int)) | \
+            set(pd.to_numeric(self.stok_ambar["ambar"], errors="coerce").fillna(0).astype(int))
+        if len(ambarlar) < 2:
+            return None
+        sat = s.assign(ambar=pd.to_numeric(s["ambar"], errors="coerce").fillna(0).astype(int)).groupby("ambar").agg(
+            net_tutar=("net_tutar", "sum"), fatura_sayisi=("fatura_no", "nunique"), urun_sayisi=("malzeme_ref", "nunique"))
+        sa = self.stok_ambar.copy()
+        sa["ambar"] = pd.to_numeric(sa["ambar"], errors="coerce").fillna(0).astype(int)
+        if len(self.maliyet):
+            sa = sa.merge(self.maliyet[["malzeme_ref", "son_birim_maliyet"]], on="malzeme_ref", how="left")
+        else:
+            sa["son_birim_maliyet"] = np.nan
+        sa["_deger"] = sa["stok_miktar"].clip(lower=0) * pd.to_numeric(sa["son_birim_maliyet"], errors="coerce")
+        stk = sa.groupby("ambar").agg(stok_kalem=("stok_miktar", lambda x: int((x > 0.0001).sum())),
+                                      stok_miktar=("stok_miktar", "sum"), stok_deger=("_deger", "sum"),
+                                      negatif_kalem=("stok_miktar", lambda x: int((x < -0.0001).sum())))
+        t = sat.join(stk, how="outer").fillna(0).reset_index()
+        t["pay"] = t["net_tutar"] / t["net_tutar"].sum() if t["net_tutar"].sum() else 0.0
+        ad = self.ambar.assign(ambar=pd.to_numeric(self.ambar["ambar"], errors="coerce").fillna(0).astype(int)) \
+            if len(self.ambar) else pd.DataFrame(columns=["ambar", "ambar_ad"])
+        t = t.merge(ad, on="ambar", how="left")
+        t["ambar_ad"] = t["ambar_ad"].fillna("Ambar " + t["ambar"].astype(str))
+        t = t.sort_values("net_tutar", ascending=False, kind="mergesort").reset_index(drop=True)
+        return t[["ambar", "ambar_ad", "net_tutar", "pay", "fatura_sayisi", "urun_sayisi", "stok_kalem", "stok_miktar",
+                  "stok_deger", "negatif_kalem"]]
+
+    # ------------------------------------------------------------------ öne çıkanlar
+    def one_cikanlar(self, olu_stok_gun: int = 90) -> list[tuple[str, str]]:
+        """Yönetimin ilk bakması gereken noktalar: (seviye, cümle). seviye: "iyi", "bilgi", "dikkat".
+        Kural tabanlıdır (yapay zekâ kullanmaz); rakamlar analizlerin kendisinden gelir."""
+        tl = lambda v: f"{float(v):,.0f}".replace(",", ".")
+        yz = lambda v: f"%{float(v) * 100:.1f}".replace(".", ",")
+        o, out = self.ozet(), []
+        k = self.donem_karsilastirma("cari")
+        if k is not None:
+            bu, gecen = k["bu_yil"].sum(), k["gecen_yil"].sum()
+            if gecen > 0:
+                d = bu / gecen - 1
+                out.append(("iyi" if d >= 0 else "dikkat",
+                            f"Satışlar geçen yılın aynı dönemine göre {yz(abs(d))} {'arttı' if d >= 0 else 'azaldı'} "
+                            f"({tl(gecen)} ₺ → {tl(bu)} ₺)."))
+        if o.get("brut_kar") is not None:
+            out.append(("bilgi", f"Tahmini brüt kâr {tl(o['brut_kar'])} ₺, marj {yz(o['kar_marji'] or 0)} (son alış maliyetiyle)."))
+            ku = self.karlilik("malzeme")
+            zarar = ku[(ku["brut_kar"] < 0) & (ku["net_tutar"] > 0)]
+            if len(zarar):
+                out.append(("dikkat", f"{len(zarar)} ürün alış maliyetinin altında satılmış görünüyor "
+                                      f"(toplam {tl(-zarar['brut_kar'].sum())} ₺ zarar); fiyatlarını kontrol edin."))
+        m = self.musteri_abc()
+        if len(m) >= 5 and o["net_satis"] > 0:
+            p5 = m.head(5)["net_tutar"].sum() / m["net_tutar"].sum()
+            if p5 >= 0.4:
+                out.append(("dikkat", f"Satışların {yz(p5)} kadarı yalnızca 5 müşteriden geliyor; müşteri yoğunlaşma riski var."))
+        co = self.cari_ozet()
+        if co and co["alacak"] > 0:
+            cumle = f"Müşterilerden {tl(co['alacak'])} ₺ alacak var"
+            if co["tahsilat_gun"] is not None:
+                cumle += f"; ortalama tahsilat süresi {co['tahsilat_gun']:.0f} gün"
+            out.append(("bilgi", cumle + "."))
+            if co["gecikmis"] / co["alacak"] >= 0.05:
+                out.append(("dikkat", f"Alacakların {tl(co['gecikmis'])} ₺ tutarındaki kısmı ({yz(co['gecikmis'] / co['alacak'])}) 60 günü aşmış."))
+        mk = self.musteri_kaybi()
+        kayip = mk[mk["durum"] == "Kayıp"]
+        if len(mk):
+            out.append(("dikkat", f"{len(kayip)} müşteri alımı kesmiş, {len(mk) - len(kayip)} müşteri seyrekleşmiş görünüyor "
+                                  f"(son 12 ayda bu müşterilerden {tl(mk['son_12_ay'].sum())} ₺ satış yapılmıştı)."))
+        olu = self.olu_stok(olu_stok_gun)
+        if len(olu):
+            out.append(("dikkat", f"{len(olu)} kalem {olu_stok_gun} gündür satılmıyor; bağlı tahmini stok değeri "
+                                  f"{tl(olu['tahmini_deger'].sum())} ₺."))
+        so = self.siparis_onerisi()
+        if len(so):
+            acil = int((so["durum"] == "Acil").sum())
+            tutar = so["oneri_tutar"].sum(min_count=1)
+            out.append(("dikkat" if acil else "bilgi",
+                        f"{len(so)} malzemenin stoğu 15 günden az yetecek ({acil} tanesi acil)"
+                        + (f"; önerilen sipariş tutarı {tl(tutar)} ₺." if pd.notna(tutar) else ".")))
+        neg = int((self.stok["stok_miktar"] < -0.0001).sum())
+        if neg:
+            out.append(("dikkat", f"{neg} malzemede stok bakiyesi eksi; Logo'da girilmemiş alış ya da sayım fişi olabilir "
+                                  "(Excel raporunun Stok Devir sayfasında listelenir)."))
+        if o["iade_orani"] >= 0.03:
+            out.append(("dikkat", f"İade oranı {yz(o['iade_orani'])}; iade nedenlerine bakılmalı."))
+        return out
+
     def veri_notlari(self):
         m = self.meta
         return [
@@ -186,6 +493,11 @@ class Analiz:
             ("İndirim/masraf vb. malzeme dışı satır", m.get("malzeme_disi_satir")),
             ("Faturalanmamış irsaliye satırı (satışa sayılmadı)", m.get("satis_faturasiz_dislanan")),
             ("Stok bakiyesinin alındığı dönem", m.get("stok_donemi")),
+            ("Maliyet tanımı", "Son alış maliyeti: her satışa o tarihten önceki en son alış (yoksa devir) birim fiyatı; "
+                               "brüt kâr tahminidir, muhasebe kârı değildir"),
+            ("Maliyeti bulunan satışların ciro payı", f"%{float(m.get('maliyet_kapsama') or 0) * 100:.1f}"
+             if m.get("maliyet_kapsama") is not None else "hesaplanmadı (eski sürümle oluşturulmuş analiz)"),
+            ("Cari bakiyelerin alındığı dönem", m.get("cari_hareket_donemi") or "cari hareket tablosu yok"),
             ("Tutar tanımı", "KDV hariç net (VATMATRAH: satır + dağıtılmış dip indirim sonrası)"),
             ("Miktar tanımı", "Ana birim (koli/paket satırları ana birime çevrildi)"),
         ]

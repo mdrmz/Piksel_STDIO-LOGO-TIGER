@@ -4,8 +4,8 @@
 [![Entegrasyon testi (Windows + Linux)](https://github.com/mdrmz/Piksel_STDIO-LOGO-TIGER/actions/workflows/entegrasyon.yml/badge.svg)](../../actions/workflows/entegrasyon.yml)
 [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-blue)](LICENSE)
 
-**Logo Tiger yedeğinden (`.bak`) dakikalar içinde satış, stok, müşteri ve tedarikçi analizi.**
-Firmaya gidin, programı açın, yedeği seçin, Excel raporunu ya da Power BI paketini alın.
+**Logo Tiger yedeğinden (`.bak`) dakikalar içinde satış, kârlılık, alacak, stok, müşteri ve tedarikçi analizi.**
+Firmaya gidin, programı açın, yedeği seçin; Excel raporunu, tek sayfalık PDF yönetici özetini ya da Power BI paketini alın.
 
 Elle hiçbir şey kurmanız gerekmez: yedeği açmak için gereken SQL Server bilgisayarda yoksa program onu kendisi kurar.
 Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özelliğini açmadığınız sürece hiçbir veri internete gönderilmez.
@@ -46,7 +46,7 @@ Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özel
 3. **Yedeği seçin ve Başlat'a basın.** İlk seferde program kendi SQL Server'ını kurar
    (internet gerekir, ~5 dakika; Windows "yönetici izni" sorduğunda **Evet** deyin). Sonraki açılışlarda bu adım atlanır.
 4. **Firma ve dönem seçin.** Program yedekteki tüm Logo firmalarını ve dönemlerini kendisi bulur.
-5. **Raporu alın.** Panelde özet görünür; **Excel raporu** ya da **Power BI paketi** düğmesiyle indirin.
+5. **Raporu alın.** Panelde özet görünür; **Excel raporu**, **PDF özet** ya da **Power BI paketi** düğmesiyle indirin.
 
 > Program yedeği geçici bir veritabanına (`LOGOANALIZ_XXXXXXXX`) geri yükler, verileri okur ve bu geçici veritabanını
 > **siler**. Firmanın kendi Logo veritabanına dokunulmaz, yazılmaz.
@@ -90,14 +90,28 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 | **Grup satış** | Malzeme grubu (`STGRPCODE`) kırılımı |
 | **Ölü stok** | Elde olup N gündür satılmayan malzemeler ve ortalama alış maliyetiyle tahmini değeri |
 | **Stok devir** | Devir hızı, stok yeterlilik süresi (gün), negatif stok uyarısı |
+| **Kârlılık** | Ürün, müşteri ve grup bazında tahmini brüt kâr ve marj (son alış maliyetiyle); en düşük marjlı ürünler |
+| **Alacak / borç yaşlandırma** | Cari bakiyeler 0-30 / 31-60 / 61-90 / 91-180 / 180+ gün dilimlerinde; ortalama tahsilat süresi |
+| **Satış temsilcisi** | Temsilci bazında net satış, pay, fatura ve müşteri sayısı, iade, tahmini kâr |
+| **Müşteri kaybı** | Düzenli alırken alımı kesilen (Kayıp) ya da seyrekleşen (Risk) müşteriler |
+| **Sipariş önerisi** | Stoğu 15 günden az yetecek ürünler, önerilen miktar, son tedarikçi ve tahmini tutar |
+| **Depo kırılımı** | Ambar bazında satış, stok kalemi ve stok değeri (birden fazla ambar varsa) |
+| **Öne çıkanlar** | Yönetimin ilk bakması gereken noktalar; kural tabanlı, yapay zekâ gerektirmez |
+
+Kârlılık, alacak, temsilci ve depo analizleri yedekte ilgili Logo tabloları varsa çıkar; yoksa o bölüm gösterilmez.
 
 ## Çıktılar
 
-- **Panel**: tarayıcıda özet, grafikler, ilk 15 ürün/müşteri, ölü stok.
+- **Panel**: tarayıcıda özet, öne çıkanlar, grafikler, ilk 15 ürün/müşteri, ölü stok, kârlılık, alacak yaşlandırma,
+  müşteri kaybı, sipariş önerisi, temsilci ve depo tabloları.
 - **Excel raporu** (`.xlsx`): Özet, Ürün/Müşteri/Tedarikçi ABC (Pareto grafiğiyle), Aylık Trend, Grup Satış,
-  Ölü Stok, Stok Devir sayfaları. Filtreli, dondurulmuş başlıklı, A4 yatay yazdırmaya hazır.
-- **Power BI paketi** (`.zip`): yıldız şema CSV'leri (`fact_satis`, `fact_alis`, `dim_cari`, `dim_malzeme`, `dim_tarih`,
-  `stok_bakiye`, ABC tabloları) ve ilişkileri/DAX ölçülerini anlatan `OKUBENI_PowerBI.txt`.
+  Ölü Stok, Stok Devir, Ürün/Müşteri/Grup Kârlılık, Alacak/Borç Yaşlandırma, Temsilci, Müşteri Kaybı, Sipariş Önerisi,
+  Depo sayfaları. Filtreli, dondurulmuş başlıklı, A4 yatay yazdırmaya hazır.
+- **PDF yönetici özeti** (`.pdf`): yönetime sunulacak tek sayfa A4; temel göstergeler, aylık grafik, ilk 5 ürün ve
+  müşteri, alacak yaşlandırma, öne çıkanlar.
+- **Power BI paketi** (`.zip`): yıldız şema CSV'leri (`fact_satis`, `fact_alis`, `fact_cari_hareket`, `dim_cari`,
+  `dim_malzeme`, `dim_tarih`, `dim_temsilci`, `dim_ambar`, `stok_bakiye`, `stok_ambar`, ABC ve hazır analiz tabloları)
+  ve ilişkileri/DAX ölçülerini (brüt kâr, cari bakiye dahil) anlatan `OKUBENI_PowerBI.txt`.
   Power BI Desktop yalnızca Windows'ta çalışır.
 
 Her analiz `~/LogoAnaliz/` (Windows: `C:\Users\<kullanıcı>\LogoAnaliz\`) altında saklanır;
@@ -147,6 +161,10 @@ Ham Logo tabloları doğrudan toplandığında ciro yanlış çıkar. Program ş
 | İrsaliye | Faturalanmamış irsaliyeler varsayılan olarak satışa sayılmaz (ayarlanabilir) |
 | Birim | Koli/paket gibi alt birimler ana birime çevrilir: `AMOUNT × UINFO2 / UINFO1` |
 | Stok | En son seçilen dönemden hesaplanır (dönem başı devir fişi önceki bakiyeyi taşır) |
+| Maliyet | Her satışa, o malzemenin satış tarihinden önceki en son alış (yoksa devir/üretim girişi) birim fiyatı atanır. Logo'nun maliyetlendirme servisi gerekmez; sonuç tahmini brüt kârdır, muhasebe kârı değildir |
+| Cari bakiye | `LG_{firma}_{dönem}_CLFLINE`, en son seçilen dönem; `SIGN=0` borç, `SIGN=1` alacak, iptaller hariç; tutarlar KDV dahil |
+| Yaşlandırma | Ödemeler en eski kayıttan düşülür (FIFO); kalan açık tutar hareket tarihine göre dilimlenir. Devir fişiyle gelen bakiye dönem başı tarihiyle yaşlanır |
+| Temsilci / ambar | `STLINE.SALESMANREF` (boşsa faturadaki) → `LG_SLSMAN`; `STLINE.SOURCEINDEX` → `L_CAPIWHOUSE` |
 
 Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gösterir.
 
@@ -199,8 +217,8 @@ makinelerde SQL Server'ı kurup `.bak` geri yükleme akışını hem kaynak kodd
 **Tek klasörlük paket derleme:** `pip install pyinstaller && pyinstaller LogoTigerAnaliz.spec --noconfirm`
 → `dist/LogoTigerAnaliz/`
 
-**Yeni sürüm yayınlama:** `core/__init__.py` içindeki `__version__` değerini artırıp (ör. `"0.3.2"`) `main`'e gönderin.
-GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0.3.2` etiketini ve Release'i kendisi oluşturur.
+**Yeni sürüm yayınlama:** `core/__init__.py` içindeki `__version__` değerini artırıp (ör. `"0.4.1"`) `main`'e gönderin.
+GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0.4.1` etiketini ve Release'i kendisi oluşturur.
 
 **Klasör yapısı**
 ```
@@ -208,8 +226,9 @@ app.py                 yerel web arayüzü (Flask, sadece 127.0.0.1)
 core/kurulum.py        SQL Server'ın otomatik kurulumu (Windows: Express, macOS/Linux: Docker)
 core/kaynak.py         .bak geri yükleme, SQL Server ve SQLite bağlantıları
 core/logo.py           firma/dönem tarama, Logo tablolarından temiz modele aktarım
-core/analiz.py         ABC, trend, ölü stok, stok devir
+core/analiz.py         ABC, trend, ölü stok, stok devir, kârlılık, cari yaşlandırma, temsilci, müşteri kaybı, sipariş önerisi, depo
 core/rapor.py          Excel raporu ve Power BI paketi
+core/pdf_ozet.py       tek sayfalık PDF yönetici özeti
 core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap, yönetici yorumu
 core/mcp_sunucu.py     Claude Desktop bağlantısı (MCP, `--mcp`)
 core/yzpaket.py        ChatGPT vb. için yapay zekâ paketi
@@ -227,9 +246,10 @@ log çıktısını ekleyin (müşteri verisi içeren dosyaları **eklemeyin**).
 
 ### English summary
 Local tool that restores a **Logo Tiger** ERP backup (`.bak`) into a temporary database on the local SQL Server,
-extracts sales/purchase/stock data with Logo-specific cleaning rules, and produces ABC analysis (products, customers,
-suppliers), monthly trends, dead-stock and stock-turnover reports as a web dashboard, an Excel workbook and a
-Power BI-ready star schema, plus optional AI Q&A (Gemini, DeepSeek, OpenAI, Claude API, Claude Desktop via MCP)
+extracts sales/purchase/stock/receivables data with Logo-specific cleaning rules, and produces ABC analysis (products,
+customers, suppliers), monthly trends, dead stock, stock turnover, estimated gross margin, receivables/payables aging,
+salesperson performance, customer churn, reorder suggestions and warehouse breakdown as a web dashboard, an Excel
+workbook, a one-page PDF executive summary and a Power BI-ready star schema, plus optional AI Q&A (Gemini, DeepSeek, OpenAI, Claude API, Claude Desktop via MCP)
 with customer-name anonymization. Runs entirely on `127.0.0.1`; without AI, no data leaves the machine.
 Download a build from [Releases](../../releases/latest) (Windows, macOS, Linux).
 

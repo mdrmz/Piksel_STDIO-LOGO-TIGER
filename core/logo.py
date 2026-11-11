@@ -13,6 +13,15 @@ Ham verideki tuzaklar ve burada nasıl ele alındıkları:
   * İadeler (TRCODE 2,3 satış iade / 6 alış iade)     -> eksi olarak düşülür
   * Satır birimi ≠ ana birim (koli, paket…)           -> miktar ana birime çevrilir: AMOUNT * UINFO2 / UINFO1
   * Dönem başı devir fişi (TRCODE 14)                 -> stok bakiyesinde sadece en son dönemden alınır
+
+Ek tablolar (yedekte varsa okunur, yoksa ilgili analiz "veri yok" der):
+  LG_{FFF}_{PP}_CLFLINE    cari hareketler (borç/alacak)  -> cari bakiye ve yaşlandırma
+  LG_SLSMAN                satış elemanları               -> temsilci performansı
+  L_CAPIWHOUSE             ambar adları                   -> depo kırılımı
+
+Maliyet: Logo'nun maliyetlendirme servisi her firmada çalıştırılmadığı için satış maliyeti ALIŞ FİYATLARINDAN
+hesaplanır: her satış satırına, o malzemenin satış tarihinden önceki en son alış (yoksa devir/üretim girişi)
+birim maliyeti atanır. Bu "son alış maliyeti" yöntemidir; muhasebe kârı değil, yönetim amaçlı tahmini brüt kârdır.
 """
 from __future__ import annotations
 
@@ -32,6 +41,17 @@ TRCODE_AD = {
 }
 SATIS = {7: 1, 8: 1, 2: -1, 3: -1}
 ALIS = {1: 1, 6: -1}
+MALIYET_KAYNAGI = (1, 13, 14, 50)   # alış, üretimden giriş, devir, sayım fazlası: birim maliyet bu girişlerden alınır
+
+# CLFLINE.TRCODE anlamları (cari hareketler)
+CARI_TRCODE_AD = {
+    1: "Nakit tahsilat", 2: "Nakit ödeme", 3: "Borç dekontu", 4: "Alacak dekontu", 5: "Virman", 6: "Kur farkı",
+    12: "Özel işlem", 14: "Devir (açılış)", 20: "Gelen havale", 21: "Gönderilen havale",
+    31: "Satınalma faturası", 32: "Perakende satış iade faturası", 33: "Toptan satış iade faturası",
+    34: "Alınan hizmet faturası", 36: "Satınalma iade faturası", 37: "Perakende satış faturası",
+    38: "Toptan satış faturası", 39: "Verilen hizmet faturası", 61: "Çek girişi", 62: "Senet girişi",
+    63: "Çek çıkışı", 64: "Senet çıkışı", 70: "Kredi kartı fişi", 72: "Firma kredi kartı fişi",
+}
 
 _DONEM_RE = re.compile(r"^LG_(\d{3})_(\d{2})_([A-Z0-9]+)$")
 _FIRMA_RE = re.compile(r"^LG_(\d{3})_([A-Z0-9]+)$")
@@ -105,6 +125,21 @@ def turkce_onar(metin):
         return metin
 
 
+def _maliyet_ata(d: pd.DataFrame, gunluk: pd.DataFrame) -> pd.Series:
+    """d'nin her satırı için: aynı malzemenin o tarihten ÖNCEKİ en son giriş birim maliyeti;
+    daha önce giriş yoksa sonraki ilk giriş. Hiç girişi olmayan malzemelerde NaN."""
+    sonuc = pd.Series(np.nan, index=d.index, dtype=float)
+    if gunluk.empty or d.empty:
+        return sonuc
+    sol = d.loc[d["tarih"].notna(), ["tarih", "malzeme_ref"]].copy()
+    sol["_i"] = sol.index
+    sol = sol.sort_values("tarih", kind="mergesort")
+    geri = pd.merge_asof(sol, gunluk, on="tarih", by="malzeme_ref", direction="backward")
+    ileri = pd.merge_asof(sol, gunluk, on="tarih", by="malzeme_ref", direction="forward")
+    sonuc.loc[sol["_i"].values] = geri["birim_maliyet"].fillna(ileri["birim_maliyet"]).values
+    return sonuc
+
+
 @dataclass
 class AktarimAyari:
     sadece_faturali: bool = True     # faturalanmamış irsaliyeleri satışa sayma
@@ -135,8 +170,9 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
     satirlar = []
     for p in donemler:
         say(f"Dönem {p}: fatura başlıkları okunuyor…")
-        inv = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {"LOGICALREF": 0, "FICHENO": "", "CANCELLED": 0, "TRCODE": 0})
-        inv.columns = ["invoiceref", "fatura_no", "fatura_iptal", "fatura_trcode"]
+        inv = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {"LOGICALREF": 0, "FICHENO": "", "CANCELLED": 0, "TRCODE": 0,
+                                                   "SALESMANREF": 0})
+        inv.columns = ["invoiceref", "fatura_no", "fatura_iptal", "fatura_trcode", "fatura_temsilci"]
         inv["fatura_no"] = inv["fatura_no"].map(turkce_onar)
         say(f"Dönem {p}: stok hareket satırları okunuyor…")
         st = _oku(kaynak, f"LG_{f}_{p}_STLINE", {
@@ -170,6 +206,12 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
                                             st["LINENET"].where(st["LINENET"].notna(),
                                                                 st["TOTAL"].fillna(0) - st["DISTDISC"].fillna(0)))
     st["hareket"] = st["TRCODE"].map(TRCODE_AD).fillna("Diğer")
+    # birim maliyet hesabı için giriş tutarı (devir fişlerinde VATMATRAH boş/0 olabilir -> TOTAL)
+    st["_giris_tutar"] = st["net_tutar"].where(st["net_tutar"] > 0, st["TOTAL"].fillna(0))
+    # satış elemanı satırda boşsa fatura başlığındakini kullan
+    st["SALESMANREF"] = pd.to_numeric(st["SALESMANREF"], errors="coerce").fillna(0).astype(int)
+    st["SALESMANREF"] = st["SALESMANREF"].where(
+        st["SALESMANREF"] > 0, pd.to_numeric(st["fatura_temsilci"], errors="coerce").fillna(0).astype(int))
     st = st.rename(columns={"STOCKREF": "malzeme_ref", "CLIENTREF": "cari_ref", "TRCODE": "trcode",
                             "IOCODE": "iocode", "INVOICEREF": "invoiceref_", "SOURCEINDEX": "ambar",
                             "SALESMANREF": "satis_temsilci_ref", "LOGICALREF": "satir_ref"})
@@ -193,13 +235,78 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
     satis = _fakt(SATIS, "satis")
     alis = _fakt(ALIS, "alis")
 
+    # ---- maliyet: her satış satırına o tarihteki son alış birim maliyeti
+    say("Satış maliyetleri hesaplanıyor (son alış fiyatına göre)…")
+    giris = st[st["trcode"].isin(MALIYET_KAYNAGI) & (st["miktar"] > 0) & (st["_giris_tutar"] > 0) & st["tarih"].notna()]
+    gunluk = giris.groupby(["malzeme_ref", "tarih"], as_index=False).agg(_t=("_giris_tutar", "sum"), _m=("miktar", "sum"))
+    gunluk["birim_maliyet"] = gunluk["_t"] / gunluk["_m"]
+    gunluk = gunluk[["malzeme_ref", "tarih", "birim_maliyet"]].sort_values("tarih").reset_index(drop=True)
+    satis["birim_maliyet"] = _maliyet_ata(satis, gunluk)
+    satis["maliyet_tutar"] = satis["miktar"] * satis["birim_maliyet"]
+    pozitif = satis.loc[~satis["iade"], "net_tutar"].sum()
+    kalite["maliyet_kapsama"] = round(float(
+        satis.loc[~satis["iade"] & satis["birim_maliyet"].notna(), "net_tutar"].sum() / pozitif), 4) if pozitif else 0.0
+    son_maliyet = (gunluk.groupby("malzeme_ref", as_index=False).last()
+                   .rename(columns={"tarih": "son_giris_tarih", "birim_maliyet": "son_birim_maliyet"}))
+    son_ted = (st[(st["trcode"] == 1) & st["tarih"].notna()].sort_values("tarih")
+               .groupby("malzeme_ref", as_index=False)["cari_ref"].last().rename(columns={"cari_ref": "son_tedarikci_ref"}))
+    malzeme_maliyet = son_maliyet.merge(son_ted, on="malzeme_ref", how="left")
+
     # ---- stok bakiyesi: en son seçilen dönemden (o dönemin devir fişi önceki bakiyeyi taşır)
     son = max(donemler)
     s = hareket[hareket["donem"] == son]
     yon = np.select([s["iocode"].isin([1, 2]), s["iocode"].isin([3, 4])], [1, -1], 0)
     stok = (s.assign(m=s["miktar"] * yon).groupby("malzeme_ref", as_index=False)["m"].sum()
             .rename(columns={"m": "stok_miktar"}))
+    stok_ambar = (s.assign(m=s["miktar"] * yon).groupby(["malzeme_ref", "ambar"], as_index=False)["m"].sum()
+                  .rename(columns={"m": "stok_miktar"}))
     kalite["stok_donemi"] = son
+
+    mevcut_tablolar = {t.upper() for t in kaynak.tablolar()}
+
+    # ---- ambar adları (L_CAPIWHOUSE aynı veritabanındaysa)
+    ambar_no = sorted(set(pd.to_numeric(hareket["ambar"], errors="coerce").fillna(0).astype(int)))
+    ambar_ad = {}
+    if "L_CAPIWHOUSE" in mevcut_tablolar:
+        try:
+            w = _oku(kaynak, "L_CAPIWHOUSE", {"FIRMNR": 0, "NR": 0, "NAME": ""})
+            w = w[pd.to_numeric(w["FIRMNR"], errors="coerce") == int(f)]
+            ambar_ad = {int(r.NR): turkce_onar(str(r.NAME or "").strip()) for r in w.itertuples()}
+        except Exception:
+            pass
+    dim_ambar = pd.DataFrame({"ambar": ambar_no, "ambar_ad": [ambar_ad.get(n) or f"Ambar {n}" for n in ambar_no]})
+
+    # ---- satış elemanları (LG_SLSMAN)
+    dim_temsilci = pd.DataFrame(columns=["temsilci_ref", "temsilci_kod", "temsilci_ad"])
+    if "LG_SLSMAN" in mevcut_tablolar:
+        try:
+            t = _oku(kaynak, "LG_SLSMAN", {"LOGICALREF": 0, "CODE": "", "DEFINITION_": ""})
+            t.columns = list(dim_temsilci.columns)
+            for c in ("temsilci_kod", "temsilci_ad"):
+                t[c] = t[c].fillna("").astype(str).str.strip().map(turkce_onar)
+            dim_temsilci = t[t["temsilci_ref"].isin(set(hareket["satis_temsilci_ref"]))].reset_index(drop=True)
+        except Exception:
+            pass
+
+    # ---- cari hareketler: en son dönemden (o dönemin devir/açılış fişi önceki bakiyeyi taşır)
+    cari_hareket = pd.DataFrame(columns=["hareket_ref", "cari_ref", "tarih", "trcode", "hareket", "borc", "alacak"])
+    if f"LG_{f}_{son}_CLFLINE" in mevcut_tablolar:
+        say(f"Dönem {son}: cari hareketler okunuyor…")
+        cl = _oku(kaynak, f"LG_{f}_{son}_CLFLINE", {"LOGICALREF": 0, "CLIENTREF": 0, "DATE_": None, "TRCODE": 0,
+                                                    "SIGN": 0, "AMOUNT": 0.0, "CANCELLED": 0})
+        cl["AMOUNT"] = pd.to_numeric(cl["AMOUNT"], errors="coerce").fillna(0.0)
+        cl_iptal = pd.to_numeric(cl["CANCELLED"], errors="coerce").fillna(0).astype(int) == 1
+        kalite["cari_iptal_satir"] = int(cl_iptal.sum())
+        cl = cl[~cl_iptal]
+        isaret = pd.to_numeric(cl["SIGN"], errors="coerce").fillna(0).astype(int)
+        trc = pd.to_numeric(cl["TRCODE"], errors="coerce").fillna(0).astype(int)
+        cari_hareket = pd.DataFrame({
+            "hareket_ref": cl["LOGICALREF"].values, "cari_ref": cl["CLIENTREF"].values,
+            "tarih": pd.to_datetime(cl["DATE_"], errors="coerce").values, "trcode": trc.values,
+            "hareket": trc.map(CARI_TRCODE_AD).fillna("Diğer").values,
+            "borc": np.where(isaret == 0, cl["AMOUNT"], 0.0), "alacak": np.where(isaret == 1, cl["AMOUNT"], 0.0)})
+        kalite["cari_hareket_donemi"] = son
+        kalite["cari_hareket_satir"] = int(len(cari_hareket))
 
     tarih_min, tarih_max = hareket["tarih"].min(), hareket["tarih"].max()
     gunler = pd.date_range(tarih_min.normalize(), tarih_max.normalize(), freq="D")
@@ -213,7 +320,9 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
     say("Analiz deposuna yazılıyor…")
     con = sqlite3.connect(hedef_db)
     for ad, df in {"dim_cari": cari, "dim_malzeme": mal, "dim_tarih": dim_tarih, "fact_hareket": hareket,
-                   "fact_satis": satis, "fact_alis": alis, "stok_bakiye": stok}.items():
+                   "fact_satis": satis, "fact_alis": alis, "stok_bakiye": stok, "stok_ambar": stok_ambar,
+                   "malzeme_maliyet": malzeme_maliyet, "dim_ambar": dim_ambar, "dim_temsilci": dim_temsilci,
+                   "fact_cari_hareket": cari_hareket}.items():
         df.to_sql(ad, con, if_exists="replace", index=False)
     meta = pd.DataFrame([{"anahtar": k, "deger": str(v)} for k, v in kalite.items()])
     meta.to_sql("meta", con, if_exists="replace", index=False)
