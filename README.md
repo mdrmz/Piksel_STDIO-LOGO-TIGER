@@ -95,6 +95,7 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 | **Aylık trend** | Aylık satış/alış ve geçen yılın aynı ayına göre değişim |
 | **Grup satış** | Malzeme grubu (`STGRPCODE`) kırılımı |
 | **Ölü stok** | Elde olup N gündür satılmayan malzemeler ve ortalama alış maliyetiyle tahmini değeri |
+| **Depo (ambar)** | Ambar başına satış, fatura sayısı, ortalama fatura, müşteri, iade, marj, stok; hangi ambardan hangi ürün ne kadar çıktı. Panelin üstündeki ambar seçiciyle tüm panel ve Excel/PDF tek ambara göre alınabilir |
 | **Stok devir** | Devir hızı, stok yeterlilik süresi (gün), negatif stok uyarısı |
 | **Kârlılık** | Ürün, müşteri ve grup bazında tahmini brüt kâr ve marj (son alış maliyetiyle); en düşük marjlı ürünler |
 | **Alacak / borç yaşlandırma** | Cari bakiyeler 0-30 / 31-60 / 61-90 / 91-180 / 180+ gün dilimlerinde; ortalama tahsilat süresi |

@@ -257,7 +257,26 @@ def _sayfalar() -> list:
         _gorsel("st_ambar", "clusteredBarChart", 760, 498, 496, 206, {"Category": [K("Ambar", "Ambar")], "Y": [O(S, "Net Satış")]},
                 "Ambara göre satış", (O(S, "Net Satış"), "azalan")),
     ]
-    sayfalar = [("Özet", ozet), ("Kârlılık", kar), ("Alacak", alacak), ("Müşteri ve Temsilci", musteri), ("Stok", stok)]
+    # Ambar sayfası: soldaki dilimleyiciden ambar seçilince sayfadaki her şey o ambara göre süzülür
+    kart_w, x0 = (1280 - 24 - 264 - 5 * 16) / 6, 24 + 264
+    ambar = [_gorsel("am_sec", "slicer", 24, 16, 248, 110, {"Values": [K("Ambar", "Ambar")]}, "Ambar seçin")] + [
+        _gorsel(f"am_k{i}", "card", round(x0 + i * (kart_w + 16)), 16, round(kart_w), 110, {"Values": [o]})
+        for i, o in enumerate([O(S, "Net Satış"), O(S, "Fatura Sayısı"), O(S, "Ortalama Fatura"), O(S, "Müşteri Sayısı"),
+                               O(S, "Satış Miktarı"), O(S, "Brüt Kâr")])] + [
+        _gorsel("am_aylik", "clusteredColumnChart", 24, 142, 760, 270,
+                {"Category": [K("Takvim", "Yıl-Ay")], "Series": [K("Ambar", "Ambar")], "Y": [O(S, "Net Satış")]},
+                "Aylık net satış — ambar ambar", (K("Takvim", "Yıl-Ay"), "artan")),
+        _gorsel("am_ozet", "tableEx", 800, 142, 456, 270,
+                {"Values": [K("Ambar", "Ambar"), O(S, "Net Satış"), O(S, "Fatura Sayısı"), O(S, "Ortalama Fatura"),
+                            O(S, "Müşteri Sayısı"), O(S, "İade Tutarı")]},
+                "Ambar bazında satış ve fatura", (O(S, "Net Satış"), "azalan")),
+        _gorsel("am_urun", "tableEx", 24, 428, 1232, 276,
+                {"Values": [K("Ambar", "Ambar"), K("Malzeme", "Malzeme"), K("Malzeme", "Grup"), O(S, "Satış Miktarı"),
+                            O(S, "Net Satış"), O(S, "Fatura Sayısı"), O(S, "Kâr Marjı")]},
+                "Hangi ambardan hangi ürün ne kadar çıktı", (O(S, "Net Satış"), "azalan")),
+    ]
+    sayfalar = [("Özet", ozet), ("Kârlılık", kar), ("Alacak", alacak), ("Müşteri ve Temsilci", musteri), ("Stok", stok),
+                ("Ambar", ambar)]
     return [{"name": f"ReportSection{i + 1:02d}", "displayName": ad, "displayOption": 1, "width": 1280, "height": 720,
              "ordinal": i, "config": "{}", "filters": "[]", "visualContainers": gorseller} for i, (ad, gorseller) in enumerate(sayfalar)]
 

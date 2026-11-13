@@ -332,16 +332,29 @@ def _grafik_aylik(t):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def _analiz_ac(aid):
+def _ambar_param():
+    """?ambar=N (yalnızca o ambar) ya da None (tüm ambarlar)."""
+    v = (request.args.get("ambar") or "").strip()
+    if not v:
+        return None
+    if not re.fullmatch(r"-?\d{1,6}", v):
+        abort(400)
+    return int(v)
+
+
+def _analiz_ac(aid, ambar=None):
     klasor = _analiz_klasor(aid)
     with open(os.path.join(klasor, "bilgi.json"), encoding="utf-8") as fh:
         bilgi = json.load(fh)
-    return klasor, bilgi, Analiz(os.path.join(klasor, "analiz.sqlite"))
+    a = Analiz(os.path.join(klasor, "analiz.sqlite"), ambar=ambar)
+    if ambar is not None and ambar not in {x["no"] for x in a.ambarlar}:
+        abort(404)
+    return klasor, bilgi, a
 
 
 @app.route("/panel/<aid>")
 def panel(aid):
-    klasor, bilgi, a = _analiz_ac(aid)
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
     esik = AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95))
     u, m, t = a.urun_abc(esik=esik), a.musteri_abc(esik=esik), a.tedarikci_abc(esik=esik)
     trend = a.aylik_trend()
@@ -363,7 +376,9 @@ def panel(aid):
         temsilci=a.temsilci_performans(), kayip=kayip.head(15), kayip_say=len(kayip),
         kayip_kesin=int((kayip["durum"] == "Kayıp").sum()), siparis=siparis.head(15), siparis_say=len(siparis),
         siparis_acil=int((siparis["durum"] == "Acil").sum()), siparis_tutar=float(siparis["oneri_tutar"].sum()),
-        depo=a.depo_kirilim(), eski_surum=a.eski_surum,
+        depo=a.depo_kirilim(), ambar_urun=a.ambar_urun(), eski_surum=a.eski_surum,
+        ambarlar=a.ambarlar if len(a.ambarlar) > 1 and not a.eski_surum else [], ambar_secili=a.ambar_secili,
+        ambar_secili_ad=a.ambar_secili_ad, aq=f"?ambar={a.ambar_secili}" if a.ambar_secili is not None else "",
         abc=[("Ürün", abc_ozet(u, "net_tutar")), ("Müşteri", abc_ozet(m, "net_tutar")), ("Tedarikçi", abc_ozet(t, "net_tutar"))],
         urun=u.head(15), musteri=m.head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
@@ -469,8 +484,11 @@ def yz_yorum(aid):
 @app.route("/indir/<aid>/<tur>")
 def indir(aid, tur):
     from core.rapor import excel_raporu, powerbi_disa_aktar
-    klasor, bilgi, a = _analiz_ac(aid)
+    ambar = _ambar_param() if tur in ("excel", "pdf") else None   # Power BI paketinde ambar dilimleyicisi var
+    klasor, bilgi, a = _analiz_ac(aid, ambar)
     ad = f"{bilgi['firma']}_{(bilgi.get('firma_ad') or 'firma').replace(' ', '_')}"
+    if ambar is not None:
+        ad += f"_{a.ambar_secili_ad.replace(' ', '_')}"
     ad = re.sub(r"[^\w\-]", "", ad)
     if tur == "excel":
         yol = os.path.join(klasor, f"Analiz_{ad}.xlsx")

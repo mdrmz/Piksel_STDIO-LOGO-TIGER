@@ -12,6 +12,14 @@
   arasında çalışır, maliyet önceki yılın alışlarından devam eder. Stok ve cari bakiye en yeni firmanın son döneminden
   alınır. Tarih aralıkları çakışırsa (çift sayım riski) ya da firmalar neredeyse hiç ortak cari kodu paylaşmıyorsa
   (farklı şirket olabilir) panelde ve veri notlarında uyarı çıkar. Tek firma seçildiğinde sonuçlar değişmez.
+- **Ambar (depo) bazında görünüm:** panelin üstünde ambar seçici (Tüm ambarlar / MERKEZ DEPO / …). Bir ambar seçilince
+  bütün panel — ciro, fatura, müşteri, ürün ABC, kâr, aylık grafik, alış, stok, ölü stok, sipariş önerisi — yalnızca
+  o ambardan çıkan/giren hareketlerle hesaplanır; Excel raporu ve PDF özet de o ambar için iner. Cari bakiye/alacak
+  ambara bağlı olmadığından tüm firmayı gösterir.
+- Depo tablosu genişledi: ambar başına fatura sayısı, ortalama fatura, müşteri, ürün çeşidi, iade, kâr marjı, stok.
+  Panelde her ambarın en çok çıkan 10 ürünü.
+- Excel: **Ambar-Ürün** (hangi ambardan hangi ürün ne kadar çıktı, tam liste) ve **Ambar Aylık** sayfaları.
+- Power BI raporuna **Ambar** sayfası: ambar dilimleyicisi, ambar bazında aylık satış, fatura özeti ve ambar × ürün tablosu.
 - Yapay zekâ anonimleştirmesi ve tanılama paketi birleştirilen tüm firmaların adlarını gizler.
 - Yalnızca LOGODB seçilirse program "firma verilerinin olduğu yedeği de ekleyin" der.
 - **Firma seçim ekranı:** çok firmalı yedeklerde arama kutusu; dönemlerin tarih aralığı; birden çok firma varsa hiçbiri

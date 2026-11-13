@@ -262,7 +262,8 @@ def test_powerbi_hazir_rapor(tmp_path):
     assert len(olculer) == len(set(olculer))
     for r in model["relationships"]:
         assert (r["fromTable"], r["fromColumn"]) in alanlar and (r["toTable"], r["toColumn"]) in alanlar
-    assert [s["displayName"] for s in rapor["sections"]] == ["Özet", "Kârlılık", "Alacak", "Müşteri ve Temsilci", "Stok"]
+    assert [s["displayName"] for s in rapor["sections"]] == ["Özet", "Kârlılık", "Alacak", "Müşteri ve Temsilci", "Stok",
+                                                               "Ambar"]
     for s in rapor["sections"]:
         for v in s["visualContainers"]:
             q = json.loads(v["config"])["singleVisual"]["prototypeQuery"]
@@ -755,3 +756,83 @@ def test_yillik_firmalar_arayuz_ve_yz_maskesi(tmp_path, monkeypatch):
     m = yz.Maske(a, bilgi["firma_ad"], True)
     metin = m.gizle("DEMO YAPI 2025 ve DEMO YAPI 2026 karşılaştırması")
     assert "DEMO YAPI" not in metin and "FİRMA" in metin
+
+
+# ---------------------------------------------------------------------------- ambar (depo) süzme ve kırılım
+def test_ambar_suzme_ham_sql_ile_ayni(depo):
+    """Yalnızca bir ambar seçildiğinde net satış, ham Logo tablosundan o ambar (SOURCEINDEX) için düz SQL ile aynı."""
+    con = sqlite3.connect(DEMO)
+    for ambar in (0, 1):
+        beklenen = 0.0
+        for p in ("01", "02"):
+            beklenen += con.execute(f"""
+                SELECT COALESCE(SUM(CASE WHEN S.TRCODE IN (7,8) THEN S.VATMATRAH ELSE -S.VATMATRAH END), 0)
+                FROM LG_001_{p}_STLINE S LEFT JOIN LG_001_{p}_INVOICE I ON I.LOGICALREF = S.INVOICEREF
+                WHERE S.TRCODE IN (2,3,7,8) AND S.LINETYPE = 0 AND S.CANCELLED = 0 AND S.INVOICEREF > 0
+                  AND COALESCE(I.CANCELLED, 0) = 0 AND S.SOURCEINDEX = ?""", (ambar,)).fetchone()[0]
+        assert Analiz(depo, ambar=ambar).ozet()["net_satis"] == pytest.approx(beklenen, abs=0.01)
+
+
+def test_ambar_kirilimi_toplamlari_tutar(depo):
+    tum = Analiz(depo)
+    dk = tum.depo_kirilim().set_index("ambar")
+    assert [x["ad"] for x in tum.ambarlar] == ["MERKEZ DEPO", "ŞUBE DEPO"]   # ciroya göre sıralı
+    assert dk["net_tutar"].sum() == pytest.approx(tum.ozet()["net_satis"], abs=0.01)
+    stok_top = 0.0
+    for n in (0, 1):
+        a = Analiz(depo, ambar=n)
+        o = a.ozet()
+        assert a.ambar_secili == n and a.ambar_secili_ad == dk.loc[n, "ambar_ad"]
+        # depo tablosundaki satır = o ambar seçilince panelin gösterdiği rakamlar
+        assert dk.loc[n, "net_tutar"] == pytest.approx(o["net_satis"], abs=0.01)
+        assert dk.loc[n, "fatura_sayisi"] == o["fatura_sayisi"]
+        assert dk.loc[n, "musteri_sayisi"] == o["musteri_sayisi"]
+        assert dk.loc[n, "iade_tutar"] == pytest.approx(o["iade_tutar"], abs=0.01)
+        assert dk.loc[n, "ortalama_fatura"] == pytest.approx(o["ortalama_fatura"], abs=0.01)
+        assert (a.satis["ambar"] == n).all() and (a.alis["ambar"] == n).all()
+        assert a.depo_kirilim() is None and a.ambar_urun() is None   # tek ambar seçiliyken kırılım yok
+        a.urun_abc(); a.musteri_abc(); a.aylik_trend(); a.olu_stok(90); a.siparis_onerisi(); a.karlilik("malzeme")
+        stok_top += a.stok["stok_miktar"].sum()
+    assert stok_top == pytest.approx(tum.stok["stok_miktar"].sum(), abs=1e-6)
+    au = tum.ambar_urun()
+    assert au.groupby("ambar")["net_tutar"].sum().to_dict() == pytest.approx(dk["net_tutar"].to_dict(), abs=0.01)
+    assert au.groupby("ambar")["sira"].min().tolist() == [1, 1]
+    aa = tum.ambar_aylik()
+    assert list(aa.columns) == ["yil_ay", "MERKEZ DEPO", "ŞUBE DEPO", "Toplam"]
+    assert aa["Toplam"].sum() == pytest.approx(tum.ozet()["net_satis"], abs=0.01)
+
+
+def test_ambar_panel_ve_excel(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import io
+    import app as A
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(300):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01", "02"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    h = c.get(f"/panel/{aid}").get_data(as_text=True)
+    assert "Tüm ambarlar" in h and f"/panel/{aid}?ambar=1" in h and "Ambar bazında en çok çıkan ürünler" in h
+    h = c.get(f"/panel/{aid}?ambar=1").get_data(as_text=True)
+    assert "Yalnızca <b>ŞUBE DEPO</b> gösteriliyor" in h and f"/indir/{aid}/excel?ambar=1" in h
+    assert c.get(f"/panel/{aid}?ambar=99").status_code == 404
+    assert c.get(f"/panel/{aid}?ambar=x").status_code == 400
+    r = c.get(f"/indir/{aid}/excel?ambar=1")
+    assert r.status_code == 200 and "UBE_DEPO" in r.headers["Content-Disposition"]
+    sayfalar = pd.ExcelFile(io.BytesIO(r.data)).sheet_names
+    assert "Ambar-Ürün" not in sayfalar   # tek ambar seçiliyken kırılım sayfaları yok
+    tam = pd.ExcelFile(io.BytesIO(c.get(f"/indir/{aid}/excel").data))
+    assert {"Depo", "Ambar-Ürün", "Ambar Aylık"} <= set(tam.sheet_names)
+    au = tam.parse("Ambar-Ürün", header=3)
+    assert set(au["Ambar"]) == {"MERKEZ DEPO", "ŞUBE DEPO"} and "Ambar içindeki payı" in au.columns
+    assert c.get(f"/indir/{aid}/pdf?ambar=0").status_code == 200
+    A._kaynagi_kapat()
