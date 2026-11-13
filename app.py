@@ -14,16 +14,18 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import traceback
 import webbrowser
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Flask, Request, abort, jsonify, redirect, render_template, request, send_file, url_for
+from werkzeug.exceptions import ClientDisconnected
 
 from core import __version__
 from core.analiz import AbcEsik, Analiz, abc_ozet
 from core import kurulum, tanilama, yz
-from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak, birlestir
+from core.kaynak import BakKaynak, KaynakHatasi, _bos_alan, _gb, MssqlKaynak, SqliteKaynak, birlestir
 from core.logo import AktarimAyari, aktar_coklu, firma_tanimlari, firmalari_tara
 
 TEMEL = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -31,8 +33,59 @@ CALISMA = os.environ.get("LOGO_ANALIZ_KLASOR", os.path.join(os.path.expanduser("
 os.makedirs(CALISMA, exist_ok=True)
 DEMO_DB = os.path.join(TEMEL, "demo", "logo_demo.sqlite")
 
+YUKLEME = os.path.join(CALISMA, "_yukleme")
+
+
+class _Istek(Request):
+    """Tarayıcıdan yüklenen yedek, Windows'un geçici klasörü yerine doğrudan _yukleme klasörüne yazılır ve sonra
+    kopyalanmadan yeniden adlandırılır. Böylece büyük bir yedek diskte iki kez değil bir kez yer kaplar."""
+
+    def _get_file_stream(self, total_content_length, content_type, filename=None, content_length=None):
+        if self.path != "/kaynak":
+            return super()._get_file_stream(total_content_length, content_type, filename, content_length)
+        os.makedirs(YUKLEME, exist_ok=True)
+        return tempfile.NamedTemporaryFile("wb+", dir=YUKLEME, prefix="yukleniyor_", suffix=".tmp", delete=False)
+
+
 app = Flask(__name__, template_folder=os.path.join(TEMEL, "templates"), static_folder=os.path.join(TEMEL, "static"))
+app.request_class = _Istek
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 ** 3
+
+
+_YARIM_YUKLEME = (
+    "Yedek dosyası tarayıcıdan programa yüklenirken yarıda kesildi. Genelde dosya seçildikten sonra "
+    "değiştiğinde (hâlâ kopyalanıyor, başka bir program açık tutuyor), USB/ağ sürücüsünden okunamadığında, "
+    "diskte yer kalmadığında ya da yükleme sürerken sayfa yenilendiğinde olur. Çözüm: dosyayı seçmek yerine "
+    "\"…ya da dosyanın tam yolu\" kutusuna tam yolunu yazın (ör. C:\\Yedekler\\TIGER.bak). "
+    "Dosya USB'de ya da ağdaysa önce bilgisayara kopyalayın.")
+
+
+def _yukleme_artiklarini_sil(haric=()):
+    """_yukleme klasöründe yarım kalmış yüklemeleri ve önceki işlerden kalan kopyaları siler."""
+    if not os.path.isdir(YUKLEME):
+        return 0
+    silinen = 0
+    for ad in os.listdir(YUKLEME):
+        yol = os.path.join(YUKLEME, ad)
+        if yol in haric or not os.path.isfile(yol):
+            continue
+        try:
+            boyut = os.path.getsize(yol)
+            os.remove(yol)
+            silinen += boyut
+        except OSError:
+            pass  # başka bir işlem kullanıyor; sonraki seferde silinir
+    return silinen
+
+
+def _disk_dolu_mesaji(yer):
+    bos = _bos_alan(yer)
+    surucu = os.path.splitdrive(os.path.abspath(yer))[0] or "/"
+    return ("Diskte yer kalmadı" + (f" ({surucu} sürücüsünde {_gb(bos)} boş)" if bos is not None else "") + ". "
+            "Yedeği açmak için yaklaşık yedek boyutunun 3–4 katı boş alan gerekir (yedeğin kendisi, SQL Server için "
+            "bir kopyası ve geri yüklenen veritabanı). Yer açın — Geri Dönüşüm Kutusu, İndirilenler, eski yedekler — "
+            "ve yedeği seçmek yerine \"…ya da dosyanın tam yolu\" kutusuna tam yolunu yazın; bu yol bir kopyayı "
+            "tamamen ortadan kaldırır.")
 
 
 # ---------------------------------------------------------------------------- iş durumu (tek kullanıcılı yerel uygulama)
@@ -133,24 +186,51 @@ def sql_hazirla():
 
 @app.route("/kaynak", methods=["POST"])
 def kaynak_ac():
-    tur = request.form.get("tur")
-    _kaynagi_kapat()
+    if not IS.calisiyor:
+        _kaynagi_kapat()
+        _yukleme_artiklarini_sil()  # önceki yarım yüklemeler (form okunmadan önce: bu isteğin dosyaları henüz yok)
+    try:
+        tur = request.form.get("tur")
+    except ClientDisconnected:
+        # Tarayıcı yüklemeyi yarıda kesti; yarım dosyayı hemen sil. (Tarayıcı çoğu zaman bu cevabı göstermez,
+        # kendi hata sayfasını açar; ama günlükte iz kalır ve disk boşa dolmaz.)
+        import gc
+        gc.collect()
+        _yukleme_artiklarini_sil()
+        tanilama.yaz(f"Yükleme yarıda kesildi (Content-Length {request.content_length or 0:,} bayt)")
+        return render_template("hata.html", tanilama=True, mesaj=_YARIM_YUKLEME), 400
+    except OSError as e:  # yükleme sırasında disk doldu
+        _yukleme_dosyalarini_kapat()
+        _yukleme_artiklarini_sil()
+        tanilama.yaz(f"Yükleme diske yazılamadı: {e}")
+        return render_template("hata.html", mesaj=_disk_dolu_mesaji(YUKLEME), tanilama=True), 507
+    if IS.calisiyor:
+        _yukleme_dosyalarini_kapat()
+        return redirect(url_for("bekle"))
 
     if tur == "bak":
         # Bir ya da iki yedek: firma verileri + (ayrı yedeklendiyse) Logo sistem veritabanı (LOGODB).
         # Hangisinin hangisi olduğu içeriğinden anlaşılır; sıra önemli değildir.
         yollar, yuklenen = [], []
-        yukleme = os.path.join(CALISMA, "_yukleme")
-        for dosya in request.files.getlist("bak_dosya") + request.files.getlist("bak_dosya2"):
-            if not dosya or not dosya.filename:
-                continue
-            if not dosya.filename.lower().endswith(".bak"):
-                return render_template("hata.html", mesaj=f"{dosya.filename}: lütfen .bak uzantılı bir Logo yedeği seçin.")
-            os.makedirs(yukleme, exist_ok=True)
-            hedef = os.path.join(yukleme, re.sub(r"[^A-Za-z0-9_.\-]", "_", dosya.filename))
-            dosya.save(hedef)
-            yollar.append(hedef)
-            yuklenen.append(hedef)
+        try:
+            for dosya in request.files.getlist("bak_dosya") + request.files.getlist("bak_dosya2"):
+                if not dosya or not dosya.filename:
+                    continue
+                if not dosya.filename.lower().endswith(".bak"):
+                    return render_template("hata.html", mesaj=f"{dosya.filename}: lütfen .bak uzantılı bir Logo yedeği seçin.")
+                os.makedirs(YUKLEME, exist_ok=True)
+                hedef = os.path.join(YUKLEME, f"{len(yuklenen) + 1}_" + re.sub(r"[^A-Za-z0-9_.\-]", "_", dosya.filename))
+                _yuklemeyi_kaydet(dosya, hedef)
+                yollar.append(hedef)
+                yuklenen.append(hedef)
+        except OSError as e:
+            tanilama.yaz(f"Yüklenen yedek kaydedilemedi: {e}")
+            _yukleme_dosyalarini_kapat()
+            _yukleme_artiklarini_sil()
+            return render_template("hata.html", mesaj=_disk_dolu_mesaji(YUKLEME), tanilama=True), 507
+        finally:
+            _yukleme_dosyalarini_kapat()
+            _yukleme_artiklarini_sil(haric=set(yuklenen))  # boş dosya alanları ve hatalı seçimlerden kalan geçici dosyalar
         for alan in ("bak_yol", "bak_yol2"):
             for satir in (request.form.get(alan) or "").splitlines():
                 y = satir.strip().strip('"')
@@ -181,9 +261,11 @@ def kaynak_ac():
                     sql = kurulum.hazirla(IS.yaz)
                     ac = lambda y: BakKaynak(y, sunucu=sql["sunucu"], port=sql["port"], kullanici=sql["kullanici"],  # noqa: E731
                                              sifre=sql["sifre"], yedek_klasoru=sql.get("yedek_klasoru"),
-                                             sunucu_yedek_klasoru=sql.get("sunucu_yedek_klasoru"), ilerleme=IS.yaz)
+                                             sunucu_yedek_klasoru=sql.get("sunucu_yedek_klasoru"), ilerleme=IS.yaz,
+                                             tasi=y in yuklenen, artiklari_temizle=True)
                 else:
-                    ac = lambda y: BakKaynak(y, ilerleme=IS.yaz, sunucudaki_yol=sunucudaki_yol, **ayar)  # noqa: E731
+                    ac = lambda y: BakKaynak(y, ilerleme=IS.yaz, sunucudaki_yol=sunucudaki_yol, tasi=y in yuklenen,  # noqa: E731
+                                             **ayar)
                 for i, y in enumerate(yollar, 1):
                     if len(yollar) > 1:
                         IS.yaz(f"[{i}/{len(yollar)}] {os.path.basename(y)} açılıyor…")
@@ -221,17 +303,36 @@ def kaynak_ac():
         # Form gövdesi okunamadı: tarayıcı yüklemeyi yarıda kesti (dosya seçildikten sonra değişti/kilitlendi,
         # USB/ağ sürücüsü koptu, sayfa yenilendi…). Werkzeug bu durumda formu sessizce boş bırakır.
         tanilama.yaz(f"Yükleme yarıda kesildi (Content-Length {request.content_length:,} bayt)")
-        return render_template("hata.html", tanilama=True, mesaj=(
-            "Yedek dosyası tarayıcıdan programa yüklenirken yarıda kesildi. Genelde dosya seçildikten sonra "
-            "değiştiğinde (hâlâ kopyalanıyor, başka bir program açık tutuyor), USB/ağ sürücüsünden okunamadığında "
-            "ya da yükleme sürerken sayfa yenilendiğinde olur. Çözüm: dosyayı seçmek yerine "
-            "\"…ya da dosyanın tam yolu\" kutusuna tam yolunu yazın (ör. C:\\Yedekler\\TIGER.bak). "
-            "Dosya USB'de ya da ağdaysa önce bilgisayara kopyalayın.")), 400
+        import gc
+        gc.collect()  # yarım kalan geçici dosyanın tutamacı bırakılsın (Windows'ta açık dosya silinemez)
+        _yukleme_artiklarini_sil()
+        return render_template("hata.html", tanilama=True, mesaj=_YARIM_YUKLEME), 400
     else:
         abort(400)
 
     IS.baslat(is_, url_for("firmalar"))
     return redirect(url_for("bekle"))
+
+
+def _yuklemeyi_kaydet(dosya, hedef):
+    """Yüklenen dosya zaten _yukleme klasöründe geçici bir dosyadaysa kopyalamadan yeniden adlandırır."""
+    ad = getattr(dosya.stream, "name", None)
+    if isinstance(ad, str) and os.path.dirname(os.path.abspath(ad)) == os.path.abspath(YUKLEME):
+        dosya.stream.close()  # Windows'ta açık dosya taşınamaz
+        os.replace(ad, hedef)
+    else:
+        dosya.save(hedef)
+
+
+def _yukleme_dosyalarini_kapat():
+    try:
+        for _, f in request.files.items(multi=True):
+            try:
+                f.stream.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def _tara(k, ad):

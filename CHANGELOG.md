@@ -1,5 +1,21 @@
 # Değişiklik günlüğü
 
+## v0.6.2 — 2026-11-13
+Disk alanı: "No space left on device" (Errno 28) hatasına yol açan durumlar giderildi.
+- **Tarayıcıdan yüklenen yedek artık diskte bir kez yer kaplar.** Önce Windows'un geçici klasörüne, sonra programın
+  klasörüne, sonra da SQL Server'ın klasörüne kopyalanıyordu (yedeğin 3 katı). Artık doğrudan programın klasörüne
+  yazılır ve SQL Server'ın klasörüne kopyalanmadan taşınır (aynı sürücüde anında).
+- **Geri yüklemeden önce yer kontrolü:** yedeğin açılmış hâlinin boyutu (sıkıştırılmış yedeklerde `.bak`'tan kat kat
+  büyük olabilir) boş alanla karşılaştırılır; yetmiyorsa "X GB gerekiyor, C: sürücüsünde Y GB boş" denir.
+- Kopya sığmıyorsa ya da yarıda kalırsa yarım dosya silinir ve yedek bulunduğu yerden okunur (önceden yarım kopya
+  diskte kalıyor, ardından bir klasörde daha deneniyordu).
+- **Önceki denemelerden kalan artıklar temizlenir:** program kapatıldığında ya da çöktüğünde silinemeyen
+  `LOGOANALIZ_XXXXXXXX` geçici veritabanları, yedek kopyaları ve yarım yüklemeler bir sonraki yedek açılışında silinir.
+- Geri yükleme yarıda kalırsa geçici veritabanı ve kopya hemen silinir.
+- Yükleme sırasında disk dolarsa anlaşılır mesaj (507) çıkar ve yarım dosya silinir.
+- Tarayıcı yüklemeyi yarıda keserse (Werkzeug `ClientDisconnected`) de v0.6.1'deki açıklayıcı mesaj gösterilir ve
+  yarım dosya hemen silinir (v0.6.1 bu durumu yakalamıyordu).
+
 ## v0.6.1 — 2026-11-13
 - Yedek tarayıcıdan yüklenirken yarıda kesilirse (dosya seçildikten sonra değişti/kilitlendi, USB/ağ sürücüsü
   okunamadı, sayfa yenilendi) artık boş "Bad Request" sayfası yerine nedenini ve çözümünü anlatan bir hata sayfası

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -233,6 +234,44 @@ def birlestir(kaynaklar: list, ilerleme=None):
     return b
 
 
+_GECICI_AD = re.compile(r"LOGOANALIZ_[0-9A-F]{8}")
+_ACIK: set[str] = set()  # bu programın şu an açık tuttuğu geçici veritabanları (temizlikte dokunulmaz)
+
+
+def _gb(bayt):
+    return f"{bayt / 1024 ** 3:,.1f} GB".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _bos_alan(yol):
+    try:
+        return shutil.disk_usage(yol).free
+    except (OSError, ValueError):
+        return None
+
+
+def _yer_kontrolu(dosyalar, veri_kl, log_kl):
+    """Geri yüklenecek veritabanının diske sığıp sığmadığını baştan söyler (SQL Server aynı bilgisayardaysa).
+    Sıkıştırılmış yedekler açılınca .bak dosyasından kat kat büyük olabilir."""
+    gerek: dict[str, list] = {}  # sürücü -> [örnek klasör, gereken bayt]
+    for f in dosyalar:
+        klasor = log_kl if f.get("Type") == "L" else veri_kl
+        if not klasor or not os.path.isdir(klasor):
+            return  # Docker ya da uzak sunucu: diskini buradan göremeyiz
+        try:
+            boyut = int(f.get("Size") or 0)
+        except (TypeError, ValueError):
+            boyut = 0
+        surucu = os.path.splitdrive(os.path.abspath(klasor))[0] or "/"
+        gerek.setdefault(surucu, [klasor, 0])[1] += boyut
+    for surucu, (klasor, gerekli) in gerek.items():
+        bos = _bos_alan(klasor)
+        if bos is not None and gerekli > bos:
+            raise KaynakHatasi(
+                f"Diskte yer yetmiyor: yedeğin açılmış hali {_gb(gerekli)} tutuyor, {surucu} sürücüsünde {_gb(bos)} boş. "
+                f"En az {_gb(gerekli - bos + 1024 ** 3)} yer açın (Geri Dönüşüm Kutusu, İndirilenler, eski yedekler) "
+                f"ve tekrar deneyin.")
+
+
 class BakKaynak(MssqlKaynak):
     """
     .bak dosyasını yerel SQL Server'a geçici bir veritabanı olarak geri yükler.
@@ -247,10 +286,14 @@ class BakKaynak(MssqlKaynak):
 
     def __init__(self, bak_yolu: str, sunucu: str = r"localhost\SQLEXPRESS", kullanici: str = "", sifre: str = "",
                  port: int = 1433, yedek_klasoru: str | None = None, sunucudaki_yol: str | None = None,
-                 sunucu_yedek_klasoru: str | None = None, isi_bitince_sil: bool = True, ilerleme=None):
+                 sunucu_yedek_klasoru: str | None = None, isi_bitince_sil: bool = True, ilerleme=None,
+                 tasi: bool = False, artiklari_temizle: bool = False):
         """
         sunucudaki_yol: SQL Server dosyayı farklı bir yoldan görüyorsa (ör. Docker'da /var/opt/mssql/backup/x.bak)
                         o yol. Verilmezse bak_yolu (veya kopyalandığı yer) kullanılır.
+        tasi: bak_yolu programın kendi geçici kopyasıysa (tarayıcıdan yüklenen) kopyalamak yerine taşınır.
+        artiklari_temizle: önceki yarıda kalmış işlerden kalan LOGOANALIZ_XXXXXXXX veritabanları ve yedek kopyaları
+                           silinir (yalnızca programın kendi SQL Server'ında kullanılır).
         """
         self._ilerleme = ilerleme or (lambda m: None)
         self.isi_bitince_sil = isi_bitince_sil
@@ -269,8 +312,15 @@ class BakKaynak(MssqlKaynak):
                 f"Ayrıntı: {str(e)[:300]}") from e
 
         self._kopya = None
-        yol = sunucudaki_yol or self._dosyayi_hazirla(bak_yolu, yedek_klasoru, sunucu_yedek_klasoru)
-        self._geri_yukle(yol)
+        if artiklari_temizle:
+            self._artiklari_temizle(yedek_klasoru)
+        _ACIK.add(self.gecici_db)
+        try:
+            yol = sunucudaki_yol or self._dosyayi_hazirla(bak_yolu, yedek_klasoru, sunucu_yedek_klasoru, tasi)
+            self._geri_yukle(yol)
+        except Exception:
+            self._yarim_kalani_sil()
+            raise
         kw["database"] = self.gecici_db
         kw.pop("autocommit")
         self.con = pymssql.connect(**kw)
@@ -290,9 +340,54 @@ class BakKaynak(MssqlKaynak):
             pass
         return sonuc
 
-    def _dosyayi_hazirla(self, bak_yolu, yedek_klasoru, sunucu_yedek_klasoru):
-        """SQL Server servisi .bak'ı kendi hesabıyla okur; dosyayı onun erişebildiği bir klasöre kopyalar.
+    def _artiklari_temizle(self, yedek_klasoru):
+        """Program kapatıldığında ya da çöktüğünde silinemeyen geçici veritabanlarını ve yedek kopyalarını siler.
+        Bunlar her denemede yedeğin boyutu kadar (ve fazlası) disk kaplar."""
+        try:
+            adlar = [r["name"] for r in self._sorgu_m("SELECT name FROM sys.databases WHERE name LIKE 'LOGOANALIZ[_]%'")]
+        except Exception:
+            adlar = []
+        for ad in adlar:
+            if not _GECICI_AD.fullmatch(ad) or ad in _ACIK:
+                continue
+            try:
+                self._sorgu_m(f"ALTER DATABASE [{ad}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE")
+                self._sorgu_m(f"DROP DATABASE [{ad}]")
+                self._ilerleme(f"Önceki yarım kalmış denemeden kalan geçici veritabanı silindi ({ad}).")
+            except Exception:
+                pass
+        if yedek_klasoru and os.path.isdir(yedek_klasoru):
+            for dosya in os.listdir(yedek_klasoru):
+                kok = os.path.splitext(dosya)[0]
+                if dosya.lower().endswith(".bak") and _GECICI_AD.fullmatch(kok) and kok not in _ACIK:
+                    try:
+                        os.remove(os.path.join(yedek_klasoru, dosya))
+                        self._ilerleme(f"Önceki denemeden kalan yedek kopyası silindi ({dosya}).")
+                    except OSError:
+                        pass
+
+    def _yarim_kalani_sil(self):
+        """Geri yükleme yarıda kalırsa geçici veritabanını ve kopyayı hemen siler (disk dolu kalmasın)."""
+        _ACIK.discard(self.gecici_db)
+        try:
+            self._sorgu_m(f"IF DB_ID('{self.gecici_db}') IS NOT NULL DROP DATABASE [{self.gecici_db}]")
+        except Exception:
+            pass
+        if self._kopya:
+            try:
+                os.remove(self._kopya)
+            except OSError:
+                pass
+        try:
+            self.master.close()
+        except Exception:
+            pass
+
+    def _dosyayi_hazirla(self, bak_yolu, yedek_klasoru, sunucu_yedek_klasoru, tasi=False):
+        """SQL Server servisi .bak'ı kendi hesabıyla okur; dosyayı onun erişebildiği bir klasöre kopyalar
+        (tasi=True ise ve aynı sürücüdeyse taşır: ek disk alanı gerekmez).
         Dönen değer: SQL Server'ın dosyayı gördüğü yol."""
+        import errno
         import shutil
         adaylar = []
         if yedek_klasoru:
@@ -309,11 +404,29 @@ class BakKaynak(MssqlKaynak):
             if not os.path.isdir(yerel):
                 continue
             hedef = os.path.join(yerel, ad)
+            if tasi:
+                try:
+                    os.replace(bak_yolu, hedef)  # aynı sürücüde anında, ek alan gerektirmez
+                    self._kopya = hedef
+                    ayrac = "/" if sunucu_tarafi.startswith("/") else "\\"
+                    return sunucu_tarafi.rstrip("/\\") + ayrac + ad
+                except OSError:
+                    pass  # farklı sürücü ya da izin yok: kopyalamayı dene
+            gerekli = os.path.getsize(bak_yolu)
+            bos = _bos_alan(yerel)
+            if bos is not None and bos < gerekli:
+                continue  # sığmıyor; sıradaki klasörü dene (yoksa dosya yerinden okunur)
             try:
                 self._ilerleme("Yedek dosyası SQL Server'ın okuyabileceği klasöre kopyalanıyor…")
                 shutil.copyfile(bak_yolu, hedef)
-            except OSError:
-                continue  # yazma izni yok; sıradaki klasörü dene
+            except OSError as e:
+                try:
+                    os.remove(hedef)  # yarım kopya diskte kalmasın
+                except OSError:
+                    pass
+                if e.errno == errno.ENOSPC:
+                    self._ilerleme("Kopya için yer yok; yedek bulunduğu yerden okunacak.")
+                continue  # yazma izni yok ya da yer yok; sıradaki klasörü dene
             self._kopya = hedef
             ayrac = "/" if sunucu_tarafi.startswith("/") else "\\"
             return sunucu_tarafi.rstrip("/\\") + ayrac + ad
@@ -329,6 +442,7 @@ class BakKaynak(MssqlKaynak):
         r = self._sorgu_m("SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(4000)) AS d, "
                           "CAST(SERVERPROPERTY('InstanceDefaultLogPath') AS nvarchar(4000)) AS l")
         veri_kl, log_kl = r[0]["d"], r[0]["l"]
+        _yer_kontrolu(dosyalar, veri_kl, log_kl)
         ayrac = "\\" if "\\" in (veri_kl or "") else "/"
         moves, params = [], []
         for i, f in enumerate(dosyalar):
@@ -347,6 +461,7 @@ class BakKaynak(MssqlKaynak):
 
     def kapat(self):
         super().kapat()
+        _ACIK.discard(self.gecici_db)
         if self.isi_bitince_sil:
             try:
                 self._sorgu_m(f"ALTER DATABASE [{self.gecici_db}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE")

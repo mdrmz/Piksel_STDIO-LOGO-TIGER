@@ -836,3 +836,137 @@ def test_ambar_panel_ve_excel(tmp_path, monkeypatch):
     assert set(au["Ambar"]) == {"MERKEZ DEPO", "ŞUBE DEPO"} and "Ambar içindeki payı" in au.columns
     assert c.get(f"/indir/{aid}/pdf?ambar=0").status_code == 200
     A._kaynagi_kapat()
+
+
+# ---------------------------------------------------------------------------- disk alanı: yükleme ve geri yükleme
+def test_yuklenen_yedek_kopyalanmadan_tasinir(tmp_path, monkeypatch):
+    """Tarayıcıdan yüklenen yedek _yukleme'ye bir kez yazılır, kopyalanmaz; BakKaynak'a taşınabilir diye bildirilir.
+    Boş dosya alanı ya da yarım yüklemeden geçici dosya kalmaz."""
+    import errno
+    import importlib
+    import io
+    import app as A
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    importlib.reload(A)
+    gelen = []
+
+    class SahteBak(SqliteKaynak):
+        tur = "bak"
+
+        def __init__(self, yol, tasi=False, **kw):
+            gelen.append((os.path.basename(yol), tasi, open(yol, "rb").read()))
+            super().__init__(DEMO)
+
+    monkeypatch.setattr(A, "BakKaynak", SahteBak)
+    monkeypatch.setattr(A.kurulum, "hazirla", lambda say: {"sunucu": "x", "port": 1, "kullanici": "", "sifre": ""})
+    kopyalandi = []
+    monkeypatch.setattr(A.shutil, "copyfileobj", lambda *a, **k: kopyalandi.append(1))
+    c = A.app.test_client()
+    os.makedirs(A.YUKLEME, exist_ok=True)
+    (tmp_path / "calisma" / "_yukleme" / "yukleniyor_eski.tmp").write_bytes(b"yarim")  # önceki yarım yükleme
+
+    c.post("/kaynak", data={"tur": "bak", "sql_kaynak": "otomatik",
+                            "bak_dosya": (io.BytesIO(b"YEDEK" * 1000), "TIGER.bak"),
+                            "bak_dosya2": (io.BytesIO(b""), "")}, content_type="multipart/form-data")
+    for _ in range(300):
+        d = c.get("/durum").json
+        if not d["calisiyor"]:
+            break
+        time.sleep(0.05)
+    assert d["hata"] is None, d
+    assert gelen == [("1_TIGER.bak", True, b"YEDEK" * 1000)] and not kopyalandi
+    assert os.listdir(A.YUKLEME) == []                     # eski yarım yükleme ve yüklenen kopya temizlendi
+    A._kaynagi_kapat()
+
+    # disk dolunca: anlaşılır mesaj, yarım dosya kalmaz
+    def dolu(dosya, hedef):
+        open(hedef, "wb").write(b"yarim")
+        raise OSError(errno.ENOSPC, "No space left on device")
+    monkeypatch.setattr(A, "_yuklemeyi_kaydet", dolu)
+    r = c.post("/kaynak", data={"tur": "bak", "bak_dosya": (io.BytesIO(b"x" * 10), "TIGER.bak")},
+               content_type="multipart/form-data")
+    h = r.get_data(as_text=True)
+    assert r.status_code == 507 and "Diskte yer kalmadı" in h and "tam yolunu" in h
+    assert os.listdir(A.YUKLEME) == []
+
+
+def _bak_kaynak_yalin(tmp_path, sorgular=None):
+    from core.kaynak import BakKaynak
+    b = BakKaynak.__new__(BakKaynak)
+    b._ilerleme, b._kopya, b.gecici_db = (lambda m: None), None, "LOGOANALIZ_ABCDEF12"
+    b._sorgu_m = lambda sql, p=None: (sorgular.append(sql) if sorgular is not None else None) or []
+    return b
+
+
+def test_yarim_kopya_silinir_ve_tasima(tmp_path, monkeypatch):
+    import errno
+    import shutil
+    from core import kaynak
+    kaynak_dosya = tmp_path / "TIGER.bak"
+    kaynak_dosya.write_bytes(b"x" * 100)
+    yedek = tmp_path / "yedek"
+    yedek.mkdir()
+    b = _bak_kaynak_yalin(tmp_path)
+
+    def dolu(a, hedef):
+        open(hedef, "wb").write(b"yarim")
+        raise OSError(errno.ENOSPC, "No space left on device")
+    monkeypatch.setattr(shutil, "copyfile", dolu)
+    yol = b._dosyayi_hazirla(str(kaynak_dosya), str(yedek), None)
+    assert yol == str(kaynak_dosya) and os.listdir(yedek) == []    # yarım kopya silindi, yedek yerinden okunur
+    monkeypatch.undo()
+
+    # yer yoksa kopyalamaya hiç girişmez
+    monkeypatch.setattr(kaynak, "_bos_alan", lambda y: 10)
+    assert b._dosyayi_hazirla(str(kaynak_dosya), str(yedek), None) == str(kaynak_dosya) and os.listdir(yedek) == []
+    monkeypatch.undo()
+
+    # taşıma: kopya yok, dosya yedek klasörüne geçer
+    b._dosyayi_hazirla(str(kaynak_dosya), str(yedek), None, tasi=True)
+    assert not kaynak_dosya.exists() and os.listdir(yedek) == ["LOGOANALIZ_ABCDEF12.bak"]
+
+
+def test_geri_yukleme_yer_kontrolu(tmp_path, monkeypatch):
+    from core import kaynak
+    monkeypatch.setattr(kaynak, "_bos_alan", lambda y: 5 * 1024 ** 3)
+    dosyalar = [{"Type": "D", "Size": 8 * 1024 ** 3}, {"Type": "L", "Size": 1024 ** 3}]
+    with pytest.raises(kaynak.KaynakHatasi, match="yer yetmiyor.*9,0 GB"):
+        kaynak._yer_kontrolu(dosyalar, str(tmp_path), str(tmp_path))
+    kaynak._yer_kontrolu([{"Type": "D", "Size": 1024 ** 3}], str(tmp_path), str(tmp_path))   # sığıyor
+    kaynak._yer_kontrolu(dosyalar, "/var/opt/mssql/data-yok", "/var/opt/mssql/data-yok")      # Docker: kontrol edilemez
+
+
+def test_onceki_denemelerin_artiklari_temizlenir(tmp_path):
+    from core import kaynak
+    yedek = tmp_path / "yedek"
+    yedek.mkdir()
+    for ad in ("LOGOANALIZ_00000001.bak", "LOGOANALIZ_ABCDEF12.bak", "musteri.bak"):
+        (yedek / ad).write_bytes(b"x")
+    sorgular = []
+    b = _bak_kaynak_yalin(tmp_path, sorgular)
+    tum = ["LOGOANALIZ_00000001", "LOGOANALIZ_ABCDEF12", "LOGOANALIZ_elle", "TIGERDB"]
+    b._sorgu_m = lambda sql, p=None: (sorgular.append(sql) or ([{"name": n} for n in tum] if "sys.databases" in sql else []))
+    kaynak._ACIK.add("LOGOANALIZ_ABCDEF12")   # bu programın açık tuttuğu: dokunulmaz
+    try:
+        b._artiklari_temizle(str(yedek))
+    finally:
+        kaynak._ACIK.discard("LOGOANALIZ_ABCDEF12")
+    dusenler = [s for s in sorgular if s.startswith("DROP")]
+    assert dusenler == ["DROP DATABASE [LOGOANALIZ_00000001]"]
+    assert sorted(os.listdir(yedek)) == ["LOGOANALIZ_ABCDEF12.bak", "musteri.bak"]
+
+
+def test_yarida_kesilen_yukleme_temizlenir(tmp_path, monkeypatch):
+    """Tarayıcı yüklemeyi yarıda keserse boş 'Bad Request' yerine açıklama gelir ve yarım dosya diskte kalmaz."""
+    import importlib
+    import io
+    import app as A
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    importlib.reload(A)
+    b = "XyZ"
+    govde = (f"--{b}\r\nContent-Disposition: form-data; name=\"tur\"\r\n\r\nbak\r\n--{b}\r\n"
+             f"Content-Disposition: form-data; name=\"bak_dosya\"; filename=\"TIGER.bak\"\r\n\r\n").encode() + b"\0" * 50000
+    r = A.app.test_client().post("/kaynak", input_stream=io.BytesIO(govde), content_length=len(govde) * 10,
+                                 content_type=f"multipart/form-data; boundary={b}")
+    assert r.status_code == 400 and "yarıda kesildi" in r.get_data(as_text=True)
+    assert os.listdir(A.YUKLEME) == []
