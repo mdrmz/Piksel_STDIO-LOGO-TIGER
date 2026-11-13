@@ -1,5 +1,33 @@
 # Değişiklik günlüğü
 
+## v0.6.0 — 2026-11-13
+- **İki yedek birlikte:** Logo'nun firma tanımlarını ayrı bir sistem veritabanında (`LOGODB`) tuttuğu kurulumlarda
+  firmadan iki `.bak` gelir. Ana ekranda **İkinci yedek var mı?** alanından ikisi birlikte seçilir; program ikisini de
+  geri yükler ve tek kaynak gibi okur. Hangisinin firma verisi, hangisinin LOGODB olduğunu içeriğinden kendisi anlar,
+  sıra önemli değildir. Firma adları (`L_CAPIFIRM`), dönem tarihleri (`L_CAPIPERIOD`) ve ambar adları (`L_CAPIWHOUSE`)
+  LOGODB'den gelir.
+- **Yıl yıl ayrı açılmış firmalar tek analizde:** firma seçim ekranında birden fazla firma işaretlenebilir
+  (ör. 001 = 2024, 002 = 2025). Seçilen firmalar birleştirilir: müşteri ve malzemeler **koduna** göre eşleştirilir
+  (her firmada iç numaralar farklıdır), satış/alış/kâr tüm yıllardan toplanır, geçen yıla göre karşılaştırma yıllar
+  arasında çalışır, maliyet önceki yılın alışlarından devam eder. Stok ve cari bakiye en yeni firmanın son döneminden
+  alınır. Tarih aralıkları çakışırsa (çift sayım riski) ya da firmalar neredeyse hiç ortak cari kodu paylaşmıyorsa
+  (farklı şirket olabilir) panelde ve veri notlarında uyarı çıkar. Tek firma seçildiğinde sonuçlar değişmez.
+- **Ambar (depo) bazında görünüm:** panelin üstünde ambar seçici (Tüm ambarlar / MERKEZ DEPO / …). Bir ambar seçilince
+  bütün panel — ciro, fatura, müşteri, ürün ABC, kâr, aylık grafik, alış, stok, ölü stok, sipariş önerisi — yalnızca
+  o ambardan çıkan/giren hareketlerle hesaplanır; Excel raporu ve PDF özet de o ambar için iner. Cari bakiye/alacak
+  ambara bağlı olmadığından tüm firmayı gösterir.
+- Depo tablosu genişledi: ambar başına fatura sayısı, ortalama fatura, müşteri, ürün çeşidi, iade, kâr marjı, stok.
+  Panelde her ambarın en çok çıkan 10 ürünü.
+- Excel: **Ambar-Ürün** (hangi ambardan hangi ürün ne kadar çıktı, tam liste) ve **Ambar Aylık** sayfaları.
+- Power BI raporuna **Ambar** sayfası: ambar dilimleyicisi, ambar bazında aylık satış, fatura özeti ve ambar × ürün tablosu.
+- Yapay zekâ anonimleştirmesi ve tanılama paketi birleştirilen tüm firmaların adlarını gizler.
+- Yalnızca LOGODB seçilirse program "firma verilerinin olduğu yedeği de ekleyin" der.
+- **Firma seçim ekranı:** çok firmalı yedeklerde arama kutusu; dönemlerin tarih aralığı; birden çok firma varsa hiçbiri
+  önceden seçili gelmez, seçilen firma vurgulanır ve "sadece bu firmanın verileri analiz edilir" yazar. LOGODB'de tanımlı
+  olup yedekte verisi olmayan firmalar ayrıca listelenir.
+- İkinci yedek açılamazsa ilk yedekten oluşturulan geçici veritabanı da silinir.
+- Entegrasyon testine gerçek SQL Server'da iki ayrı `.bak` ile uçtan uca adım eklendi.
+
 ## v0.5.0 — 2026-11-11
 - **Hazır Power BI raporu:** panelde **Power BI raporu aç** düğmesi. Program beş sayfalık raporu (Özet, Kârlılık,
   Alacak, Müşteri ve Temsilci, Stok) model, ilişkiler ve ölçüleriyle birlikte kendisi üretir ve Power BI Desktop'ta

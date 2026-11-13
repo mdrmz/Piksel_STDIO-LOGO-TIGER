@@ -66,6 +66,8 @@ def pdf_ozeti(a: Analiz, bilgi: dict, yol: str) -> str:
     # ---- başlık şeridi
     kanvas.add_patch(Rectangle((0, 0.925), 1, 0.075, color=LACIVERT, zorder=0))
     firma = bilgi.get("firma_ad") or f"Firma {bilgi.get('firma', '')}"
+    if getattr(a, "ambar_secili", None) is not None:
+        firma += f" — {a.ambar_secili_ad}"
     kanvas.text(0.05, 0.968, _kes(firma, 60), color="white", fontsize=16, fontweight="bold", va="center")
     kanvas.text(0.05, 0.942, "Yönetici özeti — satış, kârlılık, alacak ve stok", color="white", fontsize=9.5, va="center", alpha=0.9)
     kanvas.text(0.95, 0.968, f"{o['tarih_bas']} – {o['tarih_bit']}", color="white", fontsize=9.5, va="center", ha="right")

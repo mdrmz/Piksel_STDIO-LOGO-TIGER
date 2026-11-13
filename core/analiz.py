@@ -54,7 +54,9 @@ def _bir_kez(fn):
 
 
 class Analiz:
-    def __init__(self, depo: str):
+    def __init__(self, depo: str, ambar: int | None = None):
+        """ambar: verilirse satış, alış ve stok yalnızca o ambara göre süzülür (ör. sadece MERKEZ DEPO).
+        Cari bakiye/alacak ambara bağlı değildir; süzülmez."""
         self._onbellek: dict = {}
         self.con = sqlite3.connect(depo)
         q = lambda s: pd.read_sql_query(s, self.con)
@@ -78,8 +80,25 @@ class Analiz:
         self.stok_ambar = ops("stok_ambar", ["malzeme_ref", "ambar", "stok_miktar"])
         self.maliyet = ops("malzeme_maliyet", ["malzeme_ref", "son_giris_tarih", "son_birim_maliyet", "son_tedarikci_ref"])
         self.maliyet_var = "maliyet_tutar" in self.satis.columns and self.satis["maliyet_tutar"].notna().any()
-        self.ref_tarih = self.satis["tarih"].max()   # "bugün": verideki son satış tarihi
         self.eski_surum = "malzeme_maliyet" not in var   # v0.4 öncesi oluşturulmuş: kârlılık/cari/depo verisi yok
+        for d in (self.satis, self.alis, self.stok_ambar, self.ambar):
+            d["ambar"] = pd.to_numeric(d["ambar"], errors="coerce").fillna(0).astype(int)
+        self.ref_tarih = self.satis["tarih"].max()   # "bugün": verideki son satış tarihi (süzmeden önce)
+        # ambar listesi (süzmeden önce): seçici için
+        adlar = dict(zip(self.ambar["ambar"], self.ambar["ambar_ad"]))
+        ciro = self.satis.groupby("ambar")["net_tutar"].sum()
+        nolar = sorted(set(ciro.index) | set(self.stok_ambar["ambar"]), key=lambda n: (-ciro.get(n, 0.0), n))
+        self.ambarlar = [{"no": int(n), "ad": adlar.get(n) or f"Ambar {n}", "net_tutar": float(ciro.get(n, 0.0))}
+                         for n in nolar]
+        self.ambar_secili, self.ambar_secili_ad = None, None
+        if ambar is not None:
+            n = int(ambar)
+            self.ambar_secili = n
+            self.ambar_secili_ad = adlar.get(n) or f"Ambar {n}"
+            self.satis = self.satis[self.satis["ambar"] == n].reset_index(drop=True)
+            self.alis = self.alis[self.alis["ambar"] == n].reset_index(drop=True)
+            self.stok_ambar = self.stok_ambar[self.stok_ambar["ambar"] == n].reset_index(drop=True)
+            self.stok = self.stok_ambar.groupby("malzeme_ref", as_index=False)["stok_miktar"].sum()
 
     # ------------------------------------------------------------------ özet
     def ozet(self) -> dict:
@@ -395,16 +414,29 @@ class Analiz:
     # ------------------------------------------------------------------ depo (ambar) kırılımı
     @_bir_kez
     def depo_kirilim(self):
-        """Ambar bazında satış ve stok. Tek ambarla çalışan firmalarda None döner."""
+        """Ambar bazında satış (fatura, müşteri, iade, kâr) ve stok. Tek ambarla çalışan firmalarda None döner.
+        Fatura sayısı: o ambardan mal çıkan fatura sayısı (bir fatura iki ambardan mal çıkarabilir; o zaman ikisinde de sayılır)."""
         s = self.satis
-        ambarlar = set(pd.to_numeric(s["ambar"], errors="coerce").fillna(0).astype(int)) | \
-            set(pd.to_numeric(self.stok_ambar["ambar"], errors="coerce").fillna(0).astype(int))
+        ambarlar = set(s["ambar"]) | set(self.stok_ambar["ambar"])
         if len(ambarlar) < 2:
             return None
-        sat = s.assign(ambar=pd.to_numeric(s["ambar"], errors="coerce").fillna(0).astype(int)).groupby("ambar").agg(
-            net_tutar=("net_tutar", "sum"), fatura_sayisi=("fatura_no", "nunique"), urun_sayisi=("malzeme_ref", "nunique"))
+        satir = s[~s["iade"]]
+        sat = s.groupby("ambar").agg(net_tutar=("net_tutar", "sum"), satis_miktar=("miktar", "sum"))
+        sat = sat.join(satir.groupby("ambar").agg(
+            brut_satis=("net_tutar", "sum"), fatura_sayisi=("fatura_no", "nunique"),
+            musteri_sayisi=("cari_ref", "nunique"), urun_sayisi=("malzeme_ref", "nunique")), how="outer")
+        sat["iade_tutar"] = -s[s["iade"]].groupby("ambar")["net_tutar"].sum()
+        sat = sat.fillna({"iade_tutar": 0.0, "brut_satis": 0.0, "fatura_sayisi": 0, "musteri_sayisi": 0, "urun_sayisi": 0})
+        sat["ortalama_fatura"] = np.where(sat["fatura_sayisi"] > 0, sat["brut_satis"] / sat["fatura_sayisi"].replace(0, np.nan), 0.0)
+        if self.maliyet_var:
+            m = s[s["maliyet_tutar"].notna()].groupby("ambar").agg(_c=("net_tutar", "sum"), _m=("maliyet_tutar", "sum"))
+            sat = sat.join(m)
+            sat["brut_kar"] = sat["_c"] - sat["_m"]
+            sat["kar_marji"] = sat["brut_kar"] / sat["_c"].replace(0, np.nan)
+            sat = sat.drop(columns=["_c", "_m"])
+        else:
+            sat["brut_kar"], sat["kar_marji"] = np.nan, np.nan
         sa = self.stok_ambar.copy()
-        sa["ambar"] = pd.to_numeric(sa["ambar"], errors="coerce").fillna(0).astype(int)
         if len(self.maliyet):
             sa = sa.merge(self.maliyet[["malzeme_ref", "son_birim_maliyet"]], on="malzeme_ref", how="left")
         else:
@@ -413,15 +445,57 @@ class Analiz:
         stk = sa.groupby("ambar").agg(stok_kalem=("stok_miktar", lambda x: int((x > 0.0001).sum())),
                                       stok_miktar=("stok_miktar", "sum"), stok_deger=("_deger", "sum"),
                                       negatif_kalem=("stok_miktar", lambda x: int((x < -0.0001).sum())))
-        t = sat.join(stk, how="outer").fillna(0).reset_index()
+        t = sat.join(stk, how="outer").reset_index()
+        for c in t.columns:
+            if c not in ("brut_kar", "kar_marji"):
+                t[c] = t[c].fillna(0)
+        for c in ("fatura_sayisi", "musteri_sayisi", "urun_sayisi", "stok_kalem", "negatif_kalem"):
+            t[c] = t[c].astype(int)
         t["pay"] = t["net_tutar"] / t["net_tutar"].sum() if t["net_tutar"].sum() else 0.0
-        ad = self.ambar.assign(ambar=pd.to_numeric(self.ambar["ambar"], errors="coerce").fillna(0).astype(int)) \
-            if len(self.ambar) else pd.DataFrame(columns=["ambar", "ambar_ad"])
-        t = t.merge(ad, on="ambar", how="left")
+        t = t.merge(self.ambar[["ambar", "ambar_ad"]], on="ambar", how="left") if len(self.ambar) else t.assign(ambar_ad=np.nan)
         t["ambar_ad"] = t["ambar_ad"].fillna("Ambar " + t["ambar"].astype(str))
         t = t.sort_values("net_tutar", ascending=False, kind="mergesort").reset_index(drop=True)
-        return t[["ambar", "ambar_ad", "net_tutar", "pay", "fatura_sayisi", "urun_sayisi", "stok_kalem", "stok_miktar",
+        return t[["ambar", "ambar_ad", "net_tutar", "pay", "fatura_sayisi", "ortalama_fatura", "musteri_sayisi",
+                  "urun_sayisi", "satis_miktar", "iade_tutar", "brut_kar", "kar_marji", "stok_kalem", "stok_miktar",
                   "stok_deger", "negatif_kalem"]]
+
+    @_bir_kez
+    def ambar_urun(self):
+        """Ambar × ürün: hangi ambardan hangi üründen ne kadar çıktı. Ambarlar ciroya göre, ürünler ambar içinde
+        ciroya göre sıralı. Tek ambarlı firmalarda None."""
+        dk = self.depo_kirilim()
+        if dk is None:
+            return None
+        s = self.satis
+        t = s.groupby(["ambar", "malzeme_ref"], as_index=False).agg(net_tutar=("net_tutar", "sum"), miktar=("miktar", "sum"))
+        f = s[~s["iade"]].groupby(["ambar", "malzeme_ref"]).agg(fatura_sayisi=("fatura_no", "nunique"),
+                                                                 musteri_sayisi=("cari_ref", "nunique"))
+        t = t.merge(f.reset_index(), on=["ambar", "malzeme_ref"], how="left").fillna({"fatura_sayisi": 0, "musteri_sayisi": 0})
+        t["ambar_ici_pay"] = t["net_tutar"] / t.groupby("ambar")["net_tutar"].transform("sum").replace(0, np.nan)
+        t = t.merge(self.stok_ambar, on=["ambar", "malzeme_ref"], how="left").fillna({"stok_miktar": 0.0})
+        t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
+        t = t.merge(dk[["ambar", "ambar_ad"]], on="ambar", how="left")
+        sira = {n: i for i, n in enumerate(dk["ambar"])}
+        t["_s"] = t["ambar"].map(sira)
+        t = t.sort_values(["_s", "net_tutar"], ascending=[True, False], kind="mergesort").reset_index(drop=True)
+        t["sira"] = t.groupby("ambar").cumcount() + 1
+        for c in ("fatura_sayisi", "musteri_sayisi"):
+            t[c] = t[c].astype(int)
+        return t[["ambar", "ambar_ad", "sira", "malzeme_kod", "malzeme_ad", "grup_kod", "miktar", "net_tutar",
+                  "ambar_ici_pay", "fatura_sayisi", "musteri_sayisi", "stok_miktar"]]
+
+    @_bir_kez
+    def ambar_aylik(self):
+        """Aylık net satış, ambar ambar (satır: yıl-ay, kolon: ambar adı) + Toplam. Tek ambarlı firmalarda None."""
+        dk = self.depo_kirilim()
+        if dk is None:
+            return None
+        s = self.satis.assign(yil_ay=self.satis["tarih"].dt.strftime("%Y-%m"))
+        p = s.pivot_table(index="yil_ay", columns="ambar", values="net_tutar", aggfunc="sum", fill_value=0.0)
+        p = p.reindex(columns=[n for n in dk["ambar"] if n in p.columns])
+        p.columns = [dk.set_index("ambar").loc[n, "ambar_ad"] for n in p.columns]
+        p["Toplam"] = p.sum(axis=1)
+        return p.reset_index()
 
     # ------------------------------------------------------------------ öne çıkanlar
     def one_cikanlar(self, olu_stok_gun: int = 90) -> list[tuple[str, str]]:
@@ -484,8 +558,12 @@ class Analiz:
 
     def veri_notlari(self):
         m = self.meta
-        return [
+        coklu = [("Birleştirilen firmalar", f"{m.get('firma_sayisi')} firma — {m.get('firma_araliklari', '')}. "
+                                            "Müşteri ve malzemeler koduna göre eşleştirildi.")] if m.get("firma_sayisi") else []
+        uyari = [("UYARI", m["uyari"])] if m.get("uyari") else []
+        return uyari + [
             ("Firma", f"{m.get('firma')} {m.get('firma_ad', '')}"),
+            *coklu,
             ("Dönemler", m.get("donemler", "")),
             ("Tarih aralığı", f"{m.get('tarih_bas')} – {m.get('tarih_bit')}"),
             ("Okunan ham satır", m.get("ham_satir")),

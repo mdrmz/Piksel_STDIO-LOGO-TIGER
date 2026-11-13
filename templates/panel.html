@@ -5,10 +5,12 @@
   <div>
     <h1>{{ bilgi.firma }} · {{ bilgi.firma_ad or 'Firma' }}</h1>
     <div class="soluk">{{ o.tarih_bas }} – {{ o.tarih_bit }} · dönemler {{ bilgi.donemler|join(', ') }} · kaynak {{ bilgi.kaynak }}</div>
+    {% if bilgi.firmalar %}<div class="kucuk soluk" style="margin-top:4px">{{ bilgi.firmalar|length }} firma birleştirildi:
+      {% for f in bilgi.firmalar %}{{ f.no }} {{ f.ad }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <a class="btn" href="/indir/{{ aid }}/excel">Excel raporu</a>
-    <a class="btn ikincil" href="/indir/{{ aid }}/pdf" title="Yönetime sunulacak tek sayfalık özet">PDF özet</a>
+    <a class="btn" href="/indir/{{ aid }}/excel{{ aq }}">Excel raporu{% if ambar_secili is not none %} ({{ ambar_secili_ad }}){% endif %}</a>
+    <a class="btn ikincil" href="/indir/{{ aid }}/pdf{{ aq }}" title="Yönetime sunulacak tek sayfalık özet">PDF özet</a>
     <button class="btn ikincil" id="pbi-btn" title="Hazır raporu Power BI Desktop ile açar (Windows)">Power BI raporu aç</button>
     <a class="btn ikincil" href="/indir/{{ aid }}/powerbi" title="Hazır rapor + CSV dosyaları (zip)">Power BI paketi</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/yzpaket" title="ChatGPT, Claude veya Gemini sohbetine sürükleyin">Yapay zekâ paketi</a>
@@ -16,7 +18,21 @@
   </div>
 </div>
 
+{% if ambarlar %}
+<div class="ambar-sec" style="margin-top:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <span class="kucuk soluk" style="margin-right:4px">Ambar:</span>
+  <a class="btn kucuk {{ '' if ambar_secili is none else 'ikincil' }}" href="/panel/{{ aid }}">Tüm ambarlar</a>
+  {% for x in ambarlar %}<a class="btn kucuk {{ '' if ambar_secili == x.no else 'ikincil' }}" href="/panel/{{ aid }}?ambar={{ x.no }}">{{ x.ad }}</a>{% endfor %}
+</div>
+{% endif %}
+{% if ambar_secili is not none %}
+<div class="uyari" style="margin-top:12px;border-color:#BFD3F2;background:#F1F6FD;color:var(--yazi)">
+  Yalnızca <b>{{ ambar_secili_ad }}</b> gösteriliyor: satış, fatura, müşteri, ürün, kâr, alış ve stok bu ambardan çıkan/giren
+  hareketlerle hesaplandı. Cari bakiye ve alacak yaşlandırma ambara bağlı olmadığı için tüm firmayı gösterir.
+  <a href="/panel/{{ aid }}">Tüm ambarlara dön</a></div>
+{% endif %}
 <div id="pbi-durum" class="uyari" style="margin-top:14px;display:none"></div>
+{% if bilgi.uyari %}<div class="uyari" style="margin-top:14px"><b>Dikkat:</b> {{ bilgi.uyari }}</div>{% endif %}
 <div class="izgara i4" style="margin-top:20px">
   <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.net_satis|tl }} ₺</div>
     <div class="kucuk soluk">iade {{ o.iade_tutar|tl }} ₺ · {{ o.iade_orani|yuzde }}</div></div>
@@ -232,33 +248,52 @@
   </div>
 </div>
 
-{% if temsilci is not none or depo is not none %}
-<div class="izgara {{ 'i2' if temsilci is not none and depo is not none else '' }}">
-  {% if temsilci is not none %}
-  <div>
-    <h2>Satış temsilcileri</h2>
-    <div class="kart" style="padding:8px 12px"><table>
-      <tr><th>Temsilci</th><th class="s">Net satış</th><th class="s">Pay</th><th class="s">Müşteri</th><th class="s">Marj</th></tr>
-      {% for r in temsilci.itertuples() %}
-      <tr><td>{{ r.temsilci_ad }}<span class="kucuk soluk"> {{ r.temsilci_kod }}</span></td><td class="s">{{ r.net_tutar|tl }}</td>
-          <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.musteri_sayisi }}</td><td class="s">{{ r.kar_marji|yuzde }}</td></tr>
+{% if temsilci is not none %}
+<h2>Satış temsilcileri</h2>
+<div class="kart" style="padding:8px 12px"><table>
+  <tr><th>Temsilci</th><th class="s">Net satış</th><th class="s">Pay</th><th class="s">Müşteri</th><th class="s">Marj</th></tr>
+  {% for r in temsilci.itertuples() %}
+  <tr><td>{{ r.temsilci_ad }}<span class="kucuk soluk"> {{ r.temsilci_kod }}</span></td><td class="s">{{ r.net_tutar|tl }}</td>
+      <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.musteri_sayisi }}</td><td class="s">{{ r.kar_marji|yuzde }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% if depo is not none %}
+<h2>Depo (ambar) kırılımı</h2>
+<p class="kucuk soluk" style="margin-top:-6px">Ambar adına tıklayınca bütün panel yalnızca o ambara göre gösterilir.
+  Fatura: o ambardan mal çıkan fatura sayısı; iki ambardan mal çıkan fatura ikisinde de sayılır.</p>
+<div class="kart" style="padding:8px 12px;overflow-x:auto"><table>
+  <tr><th>Ambar</th><th class="s">Net satış</th><th class="s">Pay</th><th class="s">Fatura</th><th class="s">Ort. fatura</th>
+      <th class="s">Müşteri</th><th class="s">Ürün</th><th class="s">İade</th><th class="s">Marj</th>
+      <th class="s">Stok kalemi</th><th class="s">Stok değeri</th></tr>
+  {% for r in depo.itertuples() %}
+  <tr><td><a href="/panel/{{ aid }}?ambar={{ r.ambar }}">{{ r.ambar_ad }}</a><span class="kucuk soluk"> {{ r.ambar }}</span></td>
+      <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.fatura_sayisi|tl }}</td>
+      <td class="s">{{ r.ortalama_fatura|tl }}</td><td class="s">{{ r.musteri_sayisi|tl }}</td><td class="s">{{ r.urun_sayisi|tl }}</td>
+      <td class="s">{{ r.iade_tutar|tl }}</td><td class="s">{{ r.kar_marji|yuzde }}</td>
+      <td class="s">{{ r.stok_kalem|tl }}</td><td class="s">{{ r.stok_deger|tl }}</td></tr>
+  {% endfor %}
+</table></div>
+{% if ambar_urun is not none %}
+<h2>Ambar bazında en çok çıkan ürünler</h2>
+<p class="kucuk soluk" style="margin-top:-6px">Her ambarın ilk 10 ürünü. Tam liste Excel raporunun <b>Ambar-Ürün</b> sayfasında.</p>
+<div class="izgara {{ 'i2' if depo|length > 1 else '' }}">
+  {% for d in depo.itertuples() %}{% set liste = ambar_urun[ambar_urun.ambar == d.ambar].head(10) %}
+  <div class="kart" style="padding:8px 12px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 6px">
+      <b>{{ d.ambar_ad }}</b><a class="kucuk" href="/panel/{{ aid }}?ambar={{ d.ambar }}">bu ambarı aç →</a></div>
+    {% if liste|length %}<table>
+      <tr><th>#</th><th>Ürün</th><th class="s">Miktar</th><th class="s">Net tutar</th><th class="s">Ambar payı</th></tr>
+      {% for r in liste.itertuples() %}
+      <tr><td class="soluk">{{ r.sira }}</td><td>{{ r.malzeme_ad }}<span class="kucuk soluk"> {{ r.malzeme_kod }}</span></td>
+          <td class="s">{{ r.miktar|tl }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.ambar_ici_pay|yuzde }}</td></tr>
       {% endfor %}
-    </table></div>
+    </table>{% else %}<p class="kucuk soluk">Bu ambardan satış yok.</p>{% endif %}
   </div>
-  {% endif %}
-  {% if depo is not none %}
-  <div>
-    <h2>Depo (ambar) kırılımı</h2>
-    <div class="kart" style="padding:8px 12px"><table>
-      <tr><th>Ambar</th><th class="s">Net satış</th><th class="s">Pay</th><th class="s">Stok kalemi</th><th class="s">Stok değeri</th></tr>
-      {% for r in depo.itertuples() %}
-      <tr><td>{{ r.ambar_ad }}<span class="kucuk soluk"> {{ r.ambar }}</span></td><td class="s">{{ r.net_tutar|tl }}</td>
-          <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.stok_kalem|int }}</td><td class="s">{{ r.stok_deger|tl }}</td></tr>
-      {% endfor %}
-    </table></div>
-  </div>
-  {% endif %}
+  {% endfor %}
 </div>
+{% endif %}
 {% endif %}
 
 <h2>Veri notları</h2>

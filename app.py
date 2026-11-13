@@ -23,8 +23,8 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 from core import __version__
 from core.analiz import AbcEsik, Analiz, abc_ozet
 from core import kurulum, tanilama, yz
-from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak
-from core.logo import AktarimAyari, aktar, firmalari_tara
+from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak, birlestir
+from core.logo import AktarimAyari, aktar_coklu, firma_tanimlari, firmalari_tara
 
 TEMEL = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 CALISMA = os.environ.get("LOGO_ANALIZ_KLASOR", os.path.join(os.path.expanduser("~"), "LogoAnaliz"))
@@ -76,7 +76,7 @@ class Is:
 
 
 IS = Is()
-DURUM = {"kaynak": None, "firmalar": [], "kaynak_ad": ""}
+DURUM = {"kaynak": None, "firmalar": [], "kaynak_ad": "", "verisiz": []}
 
 
 def _kaynagi_kapat():
@@ -86,7 +86,7 @@ def _kaynagi_kapat():
             k.kapat()
         except Exception:
             pass
-    DURUM.update(kaynak=None, firmalar=[])
+    DURUM.update(kaynak=None, firmalar=[], verisiz=[])
 
 
 def _analizler():
@@ -137,43 +137,72 @@ def kaynak_ac():
     _kaynagi_kapat()
 
     if tur == "bak":
-        dosya = request.files.get("bak_dosya")
-        yol = (request.form.get("bak_yol") or "").strip().strip('"')
-        yuklendi = False
-        if dosya and dosya.filename:
+        # Bir ya da iki yedek: firma verileri + (ayrı yedeklendiyse) Logo sistem veritabanı (LOGODB).
+        # Hangisinin hangisi olduğu içeriğinden anlaşılır; sıra önemli değildir.
+        yollar, yuklenen = [], []
+        yukleme = os.path.join(CALISMA, "_yukleme")
+        for dosya in request.files.getlist("bak_dosya") + request.files.getlist("bak_dosya2"):
+            if not dosya or not dosya.filename:
+                continue
             if not dosya.filename.lower().endswith(".bak"):
-                return render_template("hata.html", mesaj="Lütfen .bak uzantılı bir Logo yedeği seçin.")
-            yukleme = os.path.join(CALISMA, "_yukleme")
+                return render_template("hata.html", mesaj=f"{dosya.filename}: lütfen .bak uzantılı bir Logo yedeği seçin.")
             os.makedirs(yukleme, exist_ok=True)
-            yol = os.path.join(yukleme, re.sub(r"[^A-Za-z0-9_.\-]", "_", dosya.filename))
-            dosya.save(yol)
-            yuklendi = True
-        if not yol or not os.path.exists(yol):
+            hedef = os.path.join(yukleme, re.sub(r"[^A-Za-z0-9_.\-]", "_", dosya.filename))
+            dosya.save(hedef)
+            yollar.append(hedef)
+            yuklenen.append(hedef)
+        for alan in ("bak_yol", "bak_yol2"):
+            for satir in (request.form.get(alan) or "").splitlines():
+                y = satir.strip().strip('"')
+                if y:
+                    if not os.path.exists(y):
+                        return render_template("hata.html", mesaj=f"Yedek dosyası bulunamadı: {y}")
+                    yollar.append(y)
+        yollar = list(dict.fromkeys(yollar))  # aynı dosya iki kez seçildiyse bir kez aç
+        if not yollar:
             return render_template("hata.html", mesaj="Yedek dosyası bulunamadı. Dosyayı seçin ya da tam yolunu yazın.")
+        if len(yollar) > 2:
+            return render_template("hata.html", mesaj="En fazla iki yedek seçin: firma verileri ve (varsa) LOGODB.")
         otomatik = request.form.get("sql_kaynak", "otomatik") == "otomatik"
         ayar = dict(sunucu=request.form.get("sunucu") or r"localhost\SQLEXPRESS",
                     kullanici=request.form.get("kullanici", ""), sifre=request.form.get("sifre", ""),
-                    port=int(request.form.get("port") or 1433),
-                    sunucudaki_yol=(request.form.get("sunucudaki_yol") or "").strip() or None)
+                    port=int(request.form.get("port") or 1433))
+        sunucudaki_yol = (request.form.get("sunucudaki_yol") or "").strip() or None
+        if len(yollar) > 1:
+            sunucudaki_yol = None  # tek dosya için anlamlı; iki dosyada her biri kopyalanarak açılır
 
         def is_():
-            IS.yaz(f"Yedek: {os.path.basename(yol)} ({os.path.getsize(yol) / 1024 ** 2:,.0f} MB)")
+            for y in yollar:
+                IS.yaz(f"Yedek: {os.path.basename(y)} ({os.path.getsize(y) / 1024 ** 2:,.0f} MB)")
+            acilan = []
             try:
                 if otomatik:
                     IS.yaz("Programın SQL Server'ı kontrol ediliyor…")
                     sql = kurulum.hazirla(IS.yaz)
-                    k = BakKaynak(yol, sunucu=sql["sunucu"], port=sql["port"], kullanici=sql["kullanici"],
-                                  sifre=sql["sifre"], yedek_klasoru=sql.get("yedek_klasoru"),
-                                  sunucu_yedek_klasoru=sql.get("sunucu_yedek_klasoru"), ilerleme=IS.yaz)
+                    ac = lambda y: BakKaynak(y, sunucu=sql["sunucu"], port=sql["port"], kullanici=sql["kullanici"],  # noqa: E731
+                                             sifre=sql["sifre"], yedek_klasoru=sql.get("yedek_klasoru"),
+                                             sunucu_yedek_klasoru=sql.get("sunucu_yedek_klasoru"), ilerleme=IS.yaz)
                 else:
-                    k = BakKaynak(yol, ilerleme=IS.yaz, **ayar)
-            finally:
-                if yuklendi:  # tarayıcıdan yüklenen kopya artık gereksiz (veritabanı geri yüklendi)
+                    ac = lambda y: BakKaynak(y, ilerleme=IS.yaz, sunucudaki_yol=sunucudaki_yol, **ayar)  # noqa: E731
+                for i, y in enumerate(yollar, 1):
+                    if len(yollar) > 1:
+                        IS.yaz(f"[{i}/{len(yollar)}] {os.path.basename(y)} açılıyor…")
+                    acilan.append(ac(y))
+                k = birlestir(acilan, IS.yaz)
+            except Exception:
+                for a in acilan:  # yarıda kalırsa açılmış geçici veritabanlarını da sil
                     try:
-                        os.remove(yol)
+                        a.kapat()
+                    except Exception:
+                        pass
+                raise
+            finally:
+                for y in yuklenen:  # tarayıcıdan yüklenen kopyalar artık gereksiz (veritabanları geri yüklendi)
+                    try:
+                        os.remove(y)
                     except OSError:
                         pass
-            _tara(k, os.path.basename(yol))
+            _tara(k, " + ".join(os.path.basename(y) for y in yollar))
 
     elif tur == "mssql":
         ayar = dict(sunucu=request.form.get("sunucu"), veritabani=request.form.get("veritabani"),
@@ -201,9 +230,16 @@ def _tara(k, ad):
     if not fs:
         k.kapat()
         raise KaynakHatasi("Bu veritabanında Logo firma tabloları (LG_XXX_CLCARD, LG_XXX_PP_STLINE…) bulunamadı.")
-    DURUM.update(kaynak=k, firmalar=fs, kaynak_ad=ad)
+    # Sistem veritabanında tanımlı olup bu yedekte verisi olmayan firmalar (seçim ekranında bilgi olarak gösterilir)
+    var = {f.no for f in fs}
+    verisiz = sorted((no, ad) for no, ad in firma_tanimlari(k).items() if no not in var)
+    DURUM.update(kaynak=k, firmalar=fs, kaynak_ad=ad, verisiz=verisiz)
+    IS.yaz(f"{len(fs)} firmada analiz edilebilir veri var.")
     for f in fs:
         IS.yaz(f"Firma {f.no} {f.ad}: dönemler {', '.join(f.donemler)}")
+    if verisiz:
+        IS.yaz(f"Tanımlı ama bu yedekte verisi olmayan {len(verisiz)} firma: "
+               + ", ".join(f"{no} {ad}".strip() for no, ad in verisiz))
 
 
 @app.route("/bekle")
@@ -221,19 +257,28 @@ def durum():
 def firmalar():
     if not DURUM["firmalar"]:
         return redirect(url_for("ana"))
-    return render_template("firmalar.html", firmalar=DURUM["firmalar"], kaynak_ad=DURUM["kaynak_ad"])
+    return render_template("firmalar.html", firmalar=DURUM["firmalar"], kaynak_ad=DURUM["kaynak_ad"],
+                           verisiz=DURUM.get("verisiz") or [])
 
 
 @app.route("/aktar", methods=["POST"])
 def aktar_baslat():
-    no = request.form.get("firma")
-    firma = next((f for f in DURUM["firmalar"] if f.no == no), None)
-    donemler = request.form.getlist(f"donem_{no}")
-    if not firma or not donemler:
-        return render_template("hata.html", mesaj="Bir firma ve en az bir dönem seçin.")
+    # Bir ya da birden fazla firma: yıl yıl ayrı firma açılmış şirketlerde seçilen firmalar tek analizde birleşir
+    nolar = list(dict.fromkeys(request.form.getlist("firma")))
+    secimler = []
+    for no in nolar:
+        firma = next((f for f in DURUM["firmalar"] if f.no == no), None)
+        donemler = request.form.getlist(f"donem_{no}")
+        if not firma:
+            return render_template("hata.html", mesaj=f"Firma {no} bu yedekte yok.")
+        if not donemler:
+            return render_template("hata.html", mesaj=f"Firma {no} için en az bir dönem seçin.")
+        secimler.append((firma, donemler))
+    if not secimler:
+        return render_template("hata.html", mesaj="En az bir firma ve dönem seçin.")
     ayar = AktarimAyari(sadece_faturali=bool(request.form.get("sadece_faturali")),
                         hizmetleri_dahil_et=bool(request.form.get("hizmetler")))
-    aid = f"{dt.datetime.now():%Y%m%d_%H%M%S}_F{no}"
+    aid = f"{dt.datetime.now():%Y%m%d_%H%M%S}_F{nolar[0]}" + (f"-{nolar[-1]}" if len(nolar) > 1 else "")
     klasor = os.path.join(CALISMA, aid)
     os.makedirs(klasor)
     kaynak, kaynak_ad = DURUM["kaynak"], DURUM["kaynak_ad"]
@@ -245,13 +290,17 @@ def aktar_baslat():
 
     def is_():
         try:
-            q = aktar(kaynak, firma, donemler, os.path.join(klasor, "analiz.sqlite"), ayar, ilerleme=IS.yaz)
+            q = aktar_coklu(kaynak, secimler, os.path.join(klasor, "analiz.sqlite"), ayar, ilerleme=IS.yaz)
         except Exception:
             shutil.rmtree(klasor, ignore_errors=True)
             raise
-        bilgi = {"firma": firma.no, "firma_ad": firma.ad, "donemler": donemler, "kaynak": kaynak_ad,
+        bilgi = {"firma": q["firma"], "firma_ad": q["firma_ad"], "donemler": q["donemler"].split(", "), "kaynak": kaynak_ad,
                  "olusturma": f"{dt.datetime.now():%d.%m.%Y %H:%M}", "tarih_bas": q["tarih_bas"], "tarih_bit": q["tarih_bit"],
                  "olu_stok_gun": olu_gun, "abc_a": abc_a, "abc_b": abc_b}
+        if len(secimler) > 1:
+            bilgi["firmalar"] = [{"no": f.no, "ad": f.ad, "donemler": d} for f, d in secimler]
+            if q.get("uyari"):
+                bilgi["uyari"] = q["uyari"]
         with open(os.path.join(klasor, "bilgi.json"), "w", encoding="utf-8") as fh:
             json.dump(bilgi, fh, ensure_ascii=False, indent=1)
         if not baska_firma:
@@ -283,16 +332,29 @@ def _grafik_aylik(t):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def _analiz_ac(aid):
+def _ambar_param():
+    """?ambar=N (yalnızca o ambar) ya da None (tüm ambarlar)."""
+    v = (request.args.get("ambar") or "").strip()
+    if not v:
+        return None
+    if not re.fullmatch(r"-?\d{1,6}", v):
+        abort(400)
+    return int(v)
+
+
+def _analiz_ac(aid, ambar=None):
     klasor = _analiz_klasor(aid)
     with open(os.path.join(klasor, "bilgi.json"), encoding="utf-8") as fh:
         bilgi = json.load(fh)
-    return klasor, bilgi, Analiz(os.path.join(klasor, "analiz.sqlite"))
+    a = Analiz(os.path.join(klasor, "analiz.sqlite"), ambar=ambar)
+    if ambar is not None and ambar not in {x["no"] for x in a.ambarlar}:
+        abort(404)
+    return klasor, bilgi, a
 
 
 @app.route("/panel/<aid>")
 def panel(aid):
-    klasor, bilgi, a = _analiz_ac(aid)
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
     esik = AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95))
     u, m, t = a.urun_abc(esik=esik), a.musteri_abc(esik=esik), a.tedarikci_abc(esik=esik)
     trend = a.aylik_trend()
@@ -314,7 +376,9 @@ def panel(aid):
         temsilci=a.temsilci_performans(), kayip=kayip.head(15), kayip_say=len(kayip),
         kayip_kesin=int((kayip["durum"] == "Kayıp").sum()), siparis=siparis.head(15), siparis_say=len(siparis),
         siparis_acil=int((siparis["durum"] == "Acil").sum()), siparis_tutar=float(siparis["oneri_tutar"].sum()),
-        depo=a.depo_kirilim(), eski_surum=a.eski_surum,
+        depo=a.depo_kirilim(), ambar_urun=a.ambar_urun(), eski_surum=a.eski_surum,
+        ambarlar=a.ambarlar if len(a.ambarlar) > 1 and not a.eski_surum else [], ambar_secili=a.ambar_secili,
+        ambar_secili_ad=a.ambar_secili_ad, aq=f"?ambar={a.ambar_secili}" if a.ambar_secili is not None else "",
         abc=[("Ürün", abc_ozet(u, "net_tutar")), ("Müşteri", abc_ozet(m, "net_tutar")), ("Tedarikçi", abc_ozet(t, "net_tutar"))],
         urun=u.head(15), musteri=m.head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
@@ -420,8 +484,11 @@ def yz_yorum(aid):
 @app.route("/indir/<aid>/<tur>")
 def indir(aid, tur):
     from core.rapor import excel_raporu, powerbi_disa_aktar
-    klasor, bilgi, a = _analiz_ac(aid)
+    ambar = _ambar_param() if tur in ("excel", "pdf") else None   # Power BI paketinde ambar dilimleyicisi var
+    klasor, bilgi, a = _analiz_ac(aid, ambar)
     ad = f"{bilgi['firma']}_{(bilgi.get('firma_ad') or 'firma').replace(' ', '_')}"
+    if ambar is not None:
+        ad += f"_{a.ambar_secili_ad.replace(' ', '_')}"
     ad = re.sub(r"[^\w\-]", "", ad)
     if tur == "excel":
         yol = os.path.join(klasor, f"Analiz_{ad}.xlsx")

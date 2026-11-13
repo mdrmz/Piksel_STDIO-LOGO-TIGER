@@ -262,7 +262,8 @@ def test_powerbi_hazir_rapor(tmp_path):
     assert len(olculer) == len(set(olculer))
     for r in model["relationships"]:
         assert (r["fromTable"], r["fromColumn"]) in alanlar and (r["toTable"], r["toColumn"]) in alanlar
-    assert [s["displayName"] for s in rapor["sections"]] == ["Özet", "Kârlılık", "Alacak", "Müşteri ve Temsilci", "Stok"]
+    assert [s["displayName"] for s in rapor["sections"]] == ["Özet", "Kârlılık", "Alacak", "Müşteri ve Temsilci", "Stok",
+                                                               "Ambar"]
     for s in rapor["sections"]:
         for v in s["visualContainers"]:
             q = json.loads(v["config"])["singleVisual"]["prototypeQuery"]
@@ -464,3 +465,374 @@ def test_tanilama_paketi_musteri_verisi_icermez(tmp_path, monkeypatch):
     for yasak in ("DEMO YAPI", "DEMO ŞUBE", "MÜŞTERİ", "TEDARİKÇİ", "YILMAZ", "MERKEZ DEPO"):
         assert yasak not in hepsi, yasak
     assert '"fact_satis":' in hepsi and "Aktarım tamamlandı" in hepsi
+
+
+# ---------------------------------------------------------------------------- iki yedek: LOGODB + firma verileri
+def _bol(tmp_path, ek_firma=True):
+    """Demo veritabanını Logo'daki gibi ikiye böler: sistem (L_CAPI… = LOGODB) ve firma verileri (LG_…)."""
+    src = sqlite3.connect(DEMO)
+    sistem, veri = str(tmp_path / "LOGODB.sqlite"), str(tmp_path / "TIGERDB.sqlite")
+    for hedef, kosul in ((sistem, "name LIKE 'L\\_CAPI%' ESCAPE '\\'"), (veri, "name NOT LIKE 'L\\_CAPI%' ESCAPE '\\'")):
+        con = sqlite3.connect(hedef)
+        for ad, ddl in src.execute(f"SELECT name, sql FROM sqlite_master WHERE type='table' AND {kosul}").fetchall():
+            con.execute(ddl)
+            rows = src.execute(f"SELECT * FROM {ad}").fetchall()
+            if rows:
+                con.executemany(f"INSERT INTO {ad} VALUES ({','.join('?' * len(rows[0]))})", rows)
+        if ek_firma and hedef == sistem:  # LOGODB'de tanımlı ama veri yedeğinde olmayan firma
+            con.execute("INSERT INTO L_CAPIFIRM VALUES (3, 'BAŞKA FİRMA', 'BAŞKA FİRMA A.Ş.')")
+        con.commit()
+        con.close()
+    return sistem, veri
+
+
+def test_rol_tespiti(tmp_path):
+    from core.kaynak import rol
+    sistem, veri = _bol(tmp_path)
+    assert rol(SqliteKaynak(sistem)) == "sistem"
+    assert rol(SqliteKaynak(veri)) == "veri"
+    assert rol(SqliteKaynak(DEMO)) == "veri"
+
+
+def test_sadece_logodb_anlasilir_hata(tmp_path):
+    from core.kaynak import KaynakHatasi, birlestir
+    sistem, _ = _bol(tmp_path)
+    with pytest.raises(KaynakHatasi, match="LOGODB"):
+        birlestir([SqliteKaynak(sistem)])
+
+
+@pytest.mark.parametrize("sira", ["sistem_once", "veri_once"])
+def test_iki_yedek_birlesir(tmp_path, sira):
+    from core.kaynak import BirlesikKaynak, birlestir
+    from core.logo import firma_tanimlari
+    sistem, veri = _bol(tmp_path)
+    ks = [SqliteKaynak(sistem), SqliteKaynak(veri)]
+    if sira == "veri_once":
+        ks.reverse()
+    log = []
+    k = birlestir(ks, log.append)
+    assert isinstance(k, BirlesikKaynak) and k.kaynaklar[0].ad == "TIGERDB.sqlite"  # veri yedeği her zaman önce
+    assert any("sistem veritabanı" in m for m in log)
+    fs = {f.no: f for f in firmalari_tara(k)}
+    assert set(fs) == {"001", "002"}                       # 003 tanımlı ama verisi yok -> listede değil
+    assert fs["001"].ad == "DEMO YAPI MARKET" and fs["002"].ad == "DEMO ŞUBE"
+    assert fs["001"].donem_tarih["01"] == "01.01.2025 – 31.12.2025"
+    assert firma_tanimlari(k)["003"] == "BAŞKA FİRMA"
+    # analiz sonucu tek veritabanıyla aynı; ambar adları LOGODB'den gelir
+    yol = str(tmp_path / "a.sqlite")
+    aktar(k, fs["001"], fs["001"].donemler, yol)
+    k.kapat()
+    ref = str(tmp_path / "ref.sqlite")
+    r = SqliteKaynak(DEMO)
+    aktar(r, next(f for f in firmalari_tara(r) if f.no == "001"), ["01", "02"], ref)
+    a, b = Analiz(yol), Analiz(ref)
+    for anahtar in ("net_satis", "net_alis", "brut_kar", "musteri_sayisi"):
+        assert a.ozet()[anahtar] == pytest.approx(b.ozet()[anahtar], abs=0.01), anahtar
+    assert a.depo_kirilim()["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+
+
+def test_logodb_olmadan_firma_adi_bos_ama_calisir(tmp_path):
+    _, veri = _bol(tmp_path)
+    fs = {f.no: f for f in firmalari_tara(SqliteKaynak(veri))}
+    assert set(fs) == {"001", "002"} and fs["001"].ad == "" and fs["001"].donem_tarih == {}
+
+
+def test_firma_secim_ekrani_iki_yedek(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    import importlib
+    import app as A
+    from core.kaynak import birlestir
+    importlib.reload(A)
+    sistem, veri = _bol(tmp_path)
+    A._tara(birlestir([SqliteKaynak(sistem), SqliteKaynak(veri)]), "LOGODB.bak + TIGERDB.bak")
+    h = A.app.test_client().get("/firmalar").get_data(as_text=True)
+    assert "DEMO YAPI MARKET" in h and "DEMO ŞUBE" in h and "01.01.2025 – 31.12.2025" in h
+    assert "verisi olmayan 1 firma" in h and "BAŞKA FİRMA" in h
+    assert 'class="firma-sec" name="firma" value="001" id="r001" >' in h   # birden çok firmada hiçbiri önceden seçili değil
+    A._kaynagi_kapat()
+
+
+def test_ana_sayfa_ikinci_yedek_alani():
+    import app as A
+    h = A.app.test_client().get("/").get_data(as_text=True)
+    assert 'name="bak_dosya2"' in h and 'name="bak_yol2"' in h
+
+
+def test_iki_yedek_arayuz_akisi(tmp_path, monkeypatch):
+    """/kaynak iki yolu alır, ikisini de açar, birleştirir; hata olursa açılanları kapatır (geçici veritabanı silinir)."""
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    import importlib
+    import app as A
+    importlib.reload(A)
+    sistem, veri = _bol(tmp_path)
+    acilan, kapanan = [], []
+
+    class SahteBak(SqliteKaynak):
+        tur = "bak"
+
+        def __init__(self, yol, **kw):
+            if "BOZUK" in yol:
+                raise A.KaynakHatasi("Yedek okunamadı")
+            super().__init__(yol)
+            acilan.append(self.ad)
+
+        def kapat(self):
+            kapanan.append(self.ad)
+            super().kapat()
+
+    monkeypatch.setattr(A, "BakKaynak", SahteBak)
+    monkeypatch.setattr(A.kurulum, "hazirla", lambda say: {"sunucu": "x", "port": 1, "kullanici": "", "sifre": ""})
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(300):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.05)
+
+    c.post("/kaynak", data={"tur": "bak", "bak_yol": sistem, "bak_yol2": f'"{veri}"', "sql_kaynak": "otomatik"})
+    d = bekle()
+    assert d["hata"] is None and d["sonraki"] == "/firmalar", d
+    assert acilan == ["LOGODB.sqlite", "TIGERDB.sqlite"]
+    assert "DEMO YAPI MARKET" in c.get("/firmalar").get_data(as_text=True)
+    c.post("/aktar", data={"firma": "002", "donem_002": ["01"], "sadece_faturali": "1"})
+    d = bekle()
+    assert d["hata"] is None, d
+    assert sorted(kapanan) == ["LOGODB.sqlite", "TIGERDB.sqlite"]       # iş bitince ikisi de kapatıldı
+
+    # ikinci yedek açılamazsa birincinin geçici veritabanı da silinmeli
+    bozuk = tmp_path / "BOZUK.bak"
+    bozuk.write_bytes(b"x")
+    acilan.clear(); kapanan.clear()
+    c.post("/kaynak", data={"tur": "bak", "bak_yol": veri, "bak_yol2": str(bozuk), "sql_kaynak": "otomatik"})
+    d = bekle()
+    assert "okunamadı" in d["hata"] and acilan == ["TIGERDB.sqlite"] and kapanan == ["TIGERDB.sqlite"]
+
+    # olmayan dosya ve üçten fazla yedek reddedilir
+    assert "bulunamadı" in c.post("/kaynak", data={"tur": "bak", "bak_yol2": str(tmp_path / "yok.bak")}).get_data(as_text=True)
+    r = c.post("/kaynak", data={"tur": "bak", "bak_yol": f"{sistem}\n{veri}", "bak_yol2": str(bozuk)})
+    assert "En fazla iki" in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------- yıl yıl ayrı firma: birleşik analiz
+KAYDIR = 5000  # yeni yılın firmasında kartların LOGICALREF'i farklı: eşleştirme koda göre yapılmalı
+
+
+def _yillik_firmalar(tmp_path, kod_on=""):
+    """Demo firma 001'i Logo'da her yıl ayrı firma açılmış gibi böler: 010 = 2025 (dönem 01), 011 = 2026 (dönem 01).
+    011'de cari/malzeme LOGICALREF'leri kaydırılır; kod_on verilirse 011'in cari kodları değiştirilir (farklı şirket)."""
+    yol = str(tmp_path / "yillik.sqlite")
+    src = sqlite3.connect(DEMO)
+    con = sqlite3.connect(yol)
+
+    def kopya(eski, yeni, donustur=None):
+        ddl = src.execute("SELECT sql FROM sqlite_master WHERE name=?", (eski,)).fetchone()[0]
+        con.execute(ddl.replace(eski, yeni, 1))
+        kolon = [r[1] for r in src.execute(f"PRAGMA table_info({eski})")]
+        rows = [dict(zip(kolon, r)) for r in src.execute(f"SELECT * FROM {eski}")]
+        if donustur:
+            rows = [donustur(r) for r in rows]
+        con.executemany(f"INSERT INTO {yeni} VALUES ({','.join('?' * len(kolon))})", [[r[k] for k in kolon] for r in rows])
+
+    def kart(r):
+        r["LOGICALREF"] += KAYDIR
+        if kod_on and "DEFINITION_" in r:
+            r["CODE"] = kod_on + r["CODE"]
+        return r
+
+    def hareket(r):
+        for k in ("STOCKREF", "CLIENTREF"):
+            if k in r and r[k]:
+                r[k] += KAYDIR
+        return r
+
+    for t in ("CLCARD", "ITEMS"):
+        kopya(f"LG_001_{t}", f"LG_010_{t}")
+        kopya(f"LG_001_{t}", f"LG_011_{t}", kart)
+    for t in ("INVOICE", "STLINE", "CLFLINE"):
+        kopya(f"LG_001_01_{t}", f"LG_010_01_{t}")
+        kopya(f"LG_001_02_{t}", f"LG_011_01_{t}", hareket)
+    for t in ("LG_SLSMAN", "L_CAPIWHOUSE"):
+        kopya(t, t, (lambda r: {**r, "FIRMNR": 10}) if t == "L_CAPIWHOUSE" else None)
+    con.execute("INSERT INTO L_CAPIWHOUSE SELECT 11, NR, NAME FROM L_CAPIWHOUSE WHERE FIRMNR = 10")
+    con.execute("CREATE TABLE L_CAPIFIRM (NR INTEGER, NAME TEXT, TITLE TEXT)")
+    con.executemany("INSERT INTO L_CAPIFIRM VALUES (?,?,?)", [(10, "DEMO YAPI 2025", ""), (11, "DEMO YAPI 2026", "")])
+    con.commit()
+    con.close()
+    return yol
+
+
+def _ref_analiz(tmp_path):
+    ref = str(tmp_path / "ref.sqlite")
+    k = SqliteKaynak(DEMO)
+    aktar(k, next(f for f in firmalari_tara(k) if f.no == "001"), ["01", "02"], ref)
+    return Analiz(ref)
+
+
+def test_yillik_firmalar_birlesik_analiz(tmp_path):
+    from core.logo import aktar_coklu
+    k = SqliteKaynak(_yillik_firmalar(tmp_path))
+    fs = {f.no: f for f in firmalari_tara(k)}
+    assert set(fs) == {"010", "011"}
+    yol = str(tmp_path / "birlesik.sqlite")
+    log = []
+    # seçim sırası önemsiz: tarihe göre sıralanır, stok/cari bakiye en yeni firmadan (011) alınır
+    q = aktar_coklu(k, [(fs["011"], ["01"]), (fs["010"], ["01"])], yol, ilerleme=log.append)
+    assert q["firma"] == "010-011" and q["firma_ad"] == "DEMO YAPI 2026" and q["donemler"] == "010/01, 011/01"
+    assert "uyari" not in q, q.get("uyari")
+    a, b = Analiz(yol), _ref_analiz(tmp_path)
+    oa, ob = a.ozet(), b.ozet()
+    for anahtar in ("net_satis", "net_alis", "iade_tutar", "brut_kar", "fatura_sayisi", "musteri_sayisi",
+                    "urun_sayisi", "tedarikci_sayisi"):
+        assert oa[anahtar] == pytest.approx(ob[anahtar], abs=0.01), anahtar
+    # aynı müşteri iki yılda tek kişi sayılır (kod eşleşmesi): müşteri ABC ilk 20 aynı
+    assert a.musteri_abc().head(20)["cari_kod"].tolist() == b.musteri_abc().head(20)["cari_kod"].tolist()
+    assert len(a.cari) == len(b.cari) and len(a.malzeme) == len(b.malzeme)
+    # stok ve alacak en yeni firmanın son döneminden: tek firmalı analizle aynı
+    sa = a.stok.merge(a.malzeme[["malzeme_ref", "malzeme_kod"]]).set_index("malzeme_kod")["stok_miktar"].sort_index()
+    sb = b.stok.merge(b.malzeme[["malzeme_ref", "malzeme_kod"]]).set_index("malzeme_kod")["stok_miktar"].sort_index()
+    assert (sa - sb).abs().max() < 1e-6
+    for anahtar in ("alacak", "borc"):
+        assert a.cari_ozet()[anahtar] == pytest.approx(b.cari_ozet()[anahtar], abs=0.01)
+    assert a.depo_kirilim()["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+    # geçen yıla göre karşılaştırma iki firmanın verisini birlikte kullanır
+    assert len(a.donem_karsilastirma("cari")) == len(b.donem_karsilastirma("cari"))
+    notlar = dict(a.veri_notlari())
+    assert "Birleştirilen firmalar" in notlar and notlar["Stok bakiyesinin alındığı dönem"] == "011/01"
+
+
+def test_yillik_firmalar_uyarilari(tmp_path):
+    from core.kaynak import BirlesikKaynak
+    from core.logo import aktar_coklu
+    # tarihleri çakışan firmalar (aynı yıl iki firmada seçilmiş): çift sayım uyarısı
+    (tmp_path / "a").mkdir()
+    k = SqliteKaynak(_yillik_firmalar(tmp_path / "a"))
+    fs = {f.no: f for f in firmalari_tara(k)}
+    demo = SqliteKaynak(DEMO)
+    f001 = next(f for f in firmalari_tara(demo) if f.no == "001")
+    q = aktar_coklu(BirlesikKaynak([k, demo]), [(fs["010"], ["01"]), (f001, ["01"])], str(tmp_path / "c.sqlite"))
+    assert "çakışıyor" in q["uyari"]
+    # ortak cari kodu olmayan firmalar: farklı şirket uyarısı
+    (tmp_path / "b").mkdir()
+    k3 = SqliteKaynak(_yillik_firmalar(tmp_path / "b", kod_on="X"))
+    fs3 = {f.no: f for f in firmalari_tara(k3)}
+    q = aktar_coklu(k3, [(fs3["010"], ["01"]), (fs3["011"], ["01"])], str(tmp_path / "d.sqlite"))
+    assert "farklı şirketler olabilir" in q["uyari"] and "çakışıyor" not in q["uyari"]
+
+
+def test_yillik_firmalar_arayuz_ve_yz_maskesi(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    import importlib
+    import json
+    import app as A
+    from core import yz
+    importlib.reload(A)
+    A._tara(SqliteKaynak(_yillik_firmalar(tmp_path)), "yillik.bak")
+    c = A.app.test_client()
+    assert 'type="checkbox" class="firma-sec" name="firma" value="010"' in c.get("/firmalar").get_data(as_text=True)
+    # seçilen firmalardan birinin dönemi yoksa reddedilir
+    r = c.post("/aktar", data={"firma": ["010", "011"], "donem_010": ["01"]}).get_data(as_text=True)
+    assert "Firma 011 için en az bir dönem" in r
+    c.post("/aktar", data={"firma": ["010", "011"], "donem_010": ["01"], "donem_011": ["01"], "sadece_faturali": "1"})
+    for _ in range(600):
+        d = c.get("/durum").json
+        if not d["calisiyor"]:
+            break
+        time.sleep(0.05)
+    assert d["hata"] is None, d
+    aid = d["sonraki"].rsplit("/", 1)[-1]
+    assert aid.endswith("_F010-011")
+    klasor = tmp_path / "calisma" / aid
+    bilgi = json.loads((klasor / "bilgi.json").read_text(encoding="utf-8"))
+    assert bilgi["firma"] == "010-011" and bilgi["donemler"] == ["010/01", "011/01"]
+    assert [f["no"] for f in bilgi["firmalar"]] == ["010", "011"] and "uyari" not in bilgi
+    p = c.get(d["sonraki"]).get_data(as_text=True)
+    assert "2 firma birleştirildi" in p and "DEMO YAPI 2025" in p
+    for tur in ("excel", "pdf", "powerbi"):
+        assert c.get(f"/indir/{aid}/{tur}").status_code == 200, tur
+    # yapay zekâya giden bağlamda iki yılın firma adı da gizli
+    a = Analiz(str(klasor / "analiz.sqlite"))
+    m = yz.Maske(a, bilgi["firma_ad"], True)
+    metin = m.gizle("DEMO YAPI 2025 ve DEMO YAPI 2026 karşılaştırması")
+    assert "DEMO YAPI" not in metin and "FİRMA" in metin
+
+
+# ---------------------------------------------------------------------------- ambar (depo) süzme ve kırılım
+def test_ambar_suzme_ham_sql_ile_ayni(depo):
+    """Yalnızca bir ambar seçildiğinde net satış, ham Logo tablosundan o ambar (SOURCEINDEX) için düz SQL ile aynı."""
+    con = sqlite3.connect(DEMO)
+    for ambar in (0, 1):
+        beklenen = 0.0
+        for p in ("01", "02"):
+            beklenen += con.execute(f"""
+                SELECT COALESCE(SUM(CASE WHEN S.TRCODE IN (7,8) THEN S.VATMATRAH ELSE -S.VATMATRAH END), 0)
+                FROM LG_001_{p}_STLINE S LEFT JOIN LG_001_{p}_INVOICE I ON I.LOGICALREF = S.INVOICEREF
+                WHERE S.TRCODE IN (2,3,7,8) AND S.LINETYPE = 0 AND S.CANCELLED = 0 AND S.INVOICEREF > 0
+                  AND COALESCE(I.CANCELLED, 0) = 0 AND S.SOURCEINDEX = ?""", (ambar,)).fetchone()[0]
+        assert Analiz(depo, ambar=ambar).ozet()["net_satis"] == pytest.approx(beklenen, abs=0.01)
+
+
+def test_ambar_kirilimi_toplamlari_tutar(depo):
+    tum = Analiz(depo)
+    dk = tum.depo_kirilim().set_index("ambar")
+    assert [x["ad"] for x in tum.ambarlar] == ["MERKEZ DEPO", "ŞUBE DEPO"]   # ciroya göre sıralı
+    assert dk["net_tutar"].sum() == pytest.approx(tum.ozet()["net_satis"], abs=0.01)
+    stok_top = 0.0
+    for n in (0, 1):
+        a = Analiz(depo, ambar=n)
+        o = a.ozet()
+        assert a.ambar_secili == n and a.ambar_secili_ad == dk.loc[n, "ambar_ad"]
+        # depo tablosundaki satır = o ambar seçilince panelin gösterdiği rakamlar
+        assert dk.loc[n, "net_tutar"] == pytest.approx(o["net_satis"], abs=0.01)
+        assert dk.loc[n, "fatura_sayisi"] == o["fatura_sayisi"]
+        assert dk.loc[n, "musteri_sayisi"] == o["musteri_sayisi"]
+        assert dk.loc[n, "iade_tutar"] == pytest.approx(o["iade_tutar"], abs=0.01)
+        assert dk.loc[n, "ortalama_fatura"] == pytest.approx(o["ortalama_fatura"], abs=0.01)
+        assert (a.satis["ambar"] == n).all() and (a.alis["ambar"] == n).all()
+        assert a.depo_kirilim() is None and a.ambar_urun() is None   # tek ambar seçiliyken kırılım yok
+        a.urun_abc(); a.musteri_abc(); a.aylik_trend(); a.olu_stok(90); a.siparis_onerisi(); a.karlilik("malzeme")
+        stok_top += a.stok["stok_miktar"].sum()
+    assert stok_top == pytest.approx(tum.stok["stok_miktar"].sum(), abs=1e-6)
+    au = tum.ambar_urun()
+    assert au.groupby("ambar")["net_tutar"].sum().to_dict() == pytest.approx(dk["net_tutar"].to_dict(), abs=0.01)
+    assert au.groupby("ambar")["sira"].min().tolist() == [1, 1]
+    aa = tum.ambar_aylik()
+    assert list(aa.columns) == ["yil_ay", "MERKEZ DEPO", "ŞUBE DEPO", "Toplam"]
+    assert aa["Toplam"].sum() == pytest.approx(tum.ozet()["net_satis"], abs=0.01)
+
+
+def test_ambar_panel_ve_excel(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import io
+    import app as A
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(300):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01", "02"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    h = c.get(f"/panel/{aid}").get_data(as_text=True)
+    assert "Tüm ambarlar" in h and f"/panel/{aid}?ambar=1" in h and "Ambar bazında en çok çıkan ürünler" in h
+    h = c.get(f"/panel/{aid}?ambar=1").get_data(as_text=True)
+    assert "Yalnızca <b>ŞUBE DEPO</b> gösteriliyor" in h and f"/indir/{aid}/excel?ambar=1" in h
+    assert c.get(f"/panel/{aid}?ambar=99").status_code == 404
+    assert c.get(f"/panel/{aid}?ambar=x").status_code == 400
+    r = c.get(f"/indir/{aid}/excel?ambar=1")
+    assert r.status_code == 200 and "UBE_DEPO" in r.headers["Content-Disposition"]
+    sayfalar = pd.ExcelFile(io.BytesIO(r.data)).sheet_names
+    assert "Ambar-Ürün" not in sayfalar   # tek ambar seçiliyken kırılım sayfaları yok
+    tam = pd.ExcelFile(io.BytesIO(c.get(f"/indir/{aid}/excel").data))
+    assert {"Depo", "Ambar-Ürün", "Ambar Aylık"} <= set(tam.sheet_names)
+    au = tam.parse("Ambar-Ürün", header=3)
+    assert set(au["Ambar"]) == {"MERKEZ DEPO", "ŞUBE DEPO"} and "Ambar içindeki payı" in au.columns
+    assert c.get(f"/indir/{aid}/pdf?ambar=0").status_code == 200
+    A._kaynagi_kapat()

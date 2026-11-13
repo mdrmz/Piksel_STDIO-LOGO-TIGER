@@ -36,13 +36,14 @@ BASLIK = {
     "oneri_miktar": "Önerilen sipariş", "son_birim_maliyet": "Son alış fiyatı", "oneri_tutar": "Sipariş tutarı (TL)",
     "son_tedarikci": "Son tedarikçi", "ambar": "Ambar no", "ambar_ad": "Ambar", "urun_sayisi": "Satılan ürün çeşidi",
     "stok_kalem": "Stoktaki kalem", "stok_deger": "Stok değeri (TL)", "negatif_kalem": "Eksi stoklu kalem",
+    "satis_miktar": "Satış miktarı", "miktar": "Miktar", "ambar_ici_pay": "Ambar içindeki payı",
 }
 PARA = {"net_tutar", "net_satis", "net_alis", "gecen_yil_ayni_ay", "ort_birim_maliyet", "tahmini_deger", "toplam",
         "maliyet", "brut_kar", "bakiye", "g0_30", "g31_60", "g61_90", "g91_180", "g180p", "ortalama_fatura",
         "iade_tutar", "son_12_ay", "son_birim_maliyet", "oneri_tutar", "stok_deger"}
 YUZDE = {"pay", "kumulatif_pay", "yillik_degisim", "kalem_payi", "deger_payi", "kar_marji", "kar_payi",
-         "gecikmis_pay", "iade_orani"}
-SAYI = {"toplam_miktar", "stok_miktar", "yillik_satis", "stok_gun", "oneri_miktar", "sessiz_gun", "en_eski_gun"}
+         "gecikmis_pay", "iade_orani", "ambar_ici_pay"}
+SAYI = {"toplam_miktar", "satis_miktar", "miktar", "stok_miktar", "yillik_satis", "stok_gun", "oneri_miktar", "sessiz_gun", "en_eski_gun"}
 ONDALIK = {"devir_hizi", "gunluk_satis", "ort_aralik_gun"}
 DURUM_RENK = {"Kayıp": "sC", "Risk": "sB", "Acil": "sC", "Sipariş ver": "sB"}
 MALIYET_NOTU = ("Tahmini brüt kâr = net satış − (satış miktarı × o tarihteki son alış fiyatı). "
@@ -177,7 +178,8 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
         # ---- Özet
         ws = wb.add_worksheet("Özet")
         ws.set_column(0, 0, 34); ws.set_column(1, 1, 22)
-        ws.write(0, 0, f"{m.get('firma_ad') or 'Firma ' + m.get('firma', '')} — Satış ve Stok Analizi", f["h1"])
+        ambar = f" — yalnızca {a.ambar_secili_ad}" if getattr(a, "ambar_secili", None) is not None else ""
+        ws.write(0, 0, f"{m.get('firma_ad') or 'Firma ' + m.get('firma', '')}{ambar} — Satış ve Stok Analizi", f["h1"])
         ws.write(1, 0, f"Dönem: {o['tarih_bas']} – {o['tarih_bit']}   ·   Rapor tarihi: {dt.date.today():%d.%m.%Y}", f["not"])
         satirlar = [
             ("Net satış (KDV hariç)", o["net_satis"], "para"), ("Brüt satış", o["brut_satis"], "para"),
@@ -319,8 +321,17 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
         # ---- Depo
         dk = a.depo_kirilim()
         if dk is not None:
-            _liste_sayfa(wb, f, "Depo", "Ambar (depo) bazında satış ve stok",
+            _liste_sayfa(wb, f, "Depo", "Ambar (depo) bazında satış, fatura ve stok",
+                         "Fatura sayısı: o ambardan mal çıkan fatura sayısı (iki ambardan mal çıkan fatura ikisinde de sayılır). "
                          "Stok değeri son alış fiyatıyla hesaplanır. Eksi stoklu kalemler Logo'da eksik giriş/transfer kaydına işaret eder.", dk)
+            _liste_sayfa(wb, f, "Ambar-Ürün", "Hangi ambardan hangi ürün ne kadar çıktı",
+                         "Her ambar için ürünler net satışa göre sıralı. Filtre düğmesiyle tek bir ambarı ya da ürünü seçebilirsiniz. "
+                         "Stok: o ambardaki bakiye.", a.ambar_urun())
+            aa = a.ambar_aylik()
+            ws_aa = _liste_sayfa(wb, f, "Ambar Aylık", "Aylık net satış — ambar ambar (TL, KDV hariç)",
+                                 "Satırlar ay, sütunlar ambar.", aa)
+            for j in range(1, len(aa.columns)):
+                ws_aa.set_column(j, j, max(16, len(str(aa.columns[j])) + 2), f["para"])
 
         for sayfa in wb.worksheets():   # yazdırma: yatay, sayfa genişliğine sığdır
             sayfa.set_landscape()
