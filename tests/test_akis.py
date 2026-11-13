@@ -263,7 +263,7 @@ def test_powerbi_hazir_rapor(tmp_path):
     for r in model["relationships"]:
         assert (r["fromTable"], r["fromColumn"]) in alanlar and (r["toTable"], r["toColumn"]) in alanlar
     assert [s["displayName"] for s in rapor["sections"]] == ["Özet", "Kârlılık", "Alacak", "Müşteri ve Temsilci", "Stok",
-                                                               "Ambar"]
+                                                               "Ambar", "Ürün Detay", "Cari Detay", "Aylık Detay"]
     for s in rapor["sections"]:
         for v in s["visualContainers"]:
             q = json.loads(v["config"])["singleVisual"]["prototypeQuery"]
@@ -1186,7 +1186,7 @@ def test_fatura_ekranlari(tmp_path, monkeypatch):
     c.post("/aktar", data={"firma": "001", "donem_001": ["01"], "sadece_faturali": "1"})
     aid = bekle()["sonraki"].rsplit("/", 1)[-1]
     p = c.get(f"/panel/{aid}").get_data(as_text=True)
-    assert f'href="/faturalar/{aid}"' in p and f"/abc/{aid}/urun" in p and "urun_kod=" in p
+    assert f'href="/faturalar/{aid}"' in p and f"/abc/{aid}/urun" in p and f"/urun/{aid}?kod=" in p
     h = c.get(f"/faturalar/{aid}?tur=satis&sirala=analiz_tutar").get_data(as_text=True)
     assert "LG_001_01_INVOICE" in h and "Net satış (KDV hariç)" in h and "Sonraki" in h
     import re as _re
@@ -1197,7 +1197,7 @@ def test_fatura_ekranlari(tmp_path, monkeypatch):
     for tur in ("urun", "musteri", "tedarikci"):
         h = c.get(f"/abc/{aid}/{tur}").get_data(as_text=True)
         assert "Faturalar ›" in h
-    kod = _re.search(r"urun_kod=([^&\"]+)", p).group(1)
+    kod = _re.search(r"/urun/%s\?kod=([^&\"]+)" % aid, p).group(1)
     assert "Bu ürünün net satışı" in c.get(f"/faturalar/{aid}?urun_kod={kod}&tur=satis&tur=satis_iade").get_data(as_text=True)
     x = c.get(f"/faturalar/{aid}/excel?tur=satis_iade")
     yol = tmp_path / "f.xlsx"
@@ -1290,3 +1290,131 @@ def test_abc_ekrani_kara_gore_varsayilan(tmp_path, monkeypatch):
     adlar = openpyxl.load_workbook(yol, read_only=True).sheetnames
     assert {"Ürün ABC (Kâr)", "Müşteri ABC (Kâr)", "Ürün ABC (Ciro)", "Müşteri ABC (Ciro)"} <= set(adlar)
     assert adlar.index("Ürün ABC (Kâr)") < adlar.index("Ürün ABC (Ciro)")
+
+
+# ---------------------------------------------------------------------------- ürün/cari kartı, ay detayı, hariç tutma
+def test_urun_cari_karti_ve_ay_detayi_toplamlari(depo):
+    """Kartlardaki toplamlar ABC ve aylık trend ile aynı; ay kırılımları kendi içinde tutarlı."""
+    from core import detay
+    a = Analiz(depo)
+    u = a.urun_abc().iloc[0]
+    k = detay.urun_karti(depo, u.malzeme_kod, "2025-05")
+    assert k["toplam"]["net_tutar"] == pytest.approx(u.net_tutar, abs=0.01)
+    assert k["aylik"]["net_tutar"].sum() == pytest.approx(u.net_tutar, abs=0.01)
+    assert k["musteri"]["net_tutar"].sum() == pytest.approx(u.net_tutar, abs=0.01)
+    ay = k["aylik"].set_index("yil_ay").loc["2025-05"]
+    assert k["ay_detay"]["net_tutar"].sum() == pytest.approx(ay.net_tutar, abs=0.01) and len(k["ay_detay"]) == ay.adet
+    assert k["bulgular"] and all(b["tur"] in ("bilgi", "dikkat", "iyi") and b["metin"] for b in k["bulgular"])
+    assert detay.urun_karti(depo, "YOK-BÖYLE-KOD") is None
+    m = a.musteri_abc().iloc[0]
+    c = detay.cari_karti(depo, m.cari_kod, "2025-05")
+    assert c["toplam"]["net_tutar"] == pytest.approx(m.net_tutar, abs=0.01)
+    assert c["urun"]["net_tutar"].sum() == pytest.approx(m.net_tutar, abs=0.01) and c["bulgular"]
+    t = a.aylik_trend().set_index("yil_ay")
+    d = detay.ay_detayi(depo, "2025-05")
+    assert d["toplam"]["net_tutar"] == pytest.approx(t.loc["2025-05", "net_satis"], abs=0.01)
+    assert d["cari"]["net_tutar"].sum() == pytest.approx(d["toplam"]["net_tutar"], abs=0.01)
+    assert d["urun"]["net_tutar"].sum() == pytest.approx(d["toplam"]["net_tutar"], abs=0.01)
+    assert d["onceki"]["toplam"] == pytest.approx(t.loc["2025-04", "net_satis"], abs=0.01) and d["gecen_yil"] is None
+    assert detay.ay_detayi(depo, "1999-01") is None
+    s = detay.ara(depo, u.malzeme_ad[:4].lower())
+    assert u.malzeme_kod in set(s["urun"]["kod"]) or s["urun_say"] > 30
+
+
+def test_bulgular_tek_musteri_ve_dusus():
+    """Yapay veri: satışın tamamı tek müşteriden ve son aylarda kesilmiş -> yoğunlaşma ve 'satış yok' bulguları çıkar."""
+    from core import detay
+    aylar = [f"2025-{m:02d}" for m in range(1, 13)]
+    s = pd.DataFrame({"tarih": pd.to_datetime([f"2025-{m:02d}-10" for m in range(1, 9)]), "cari_ref": 1, "cari_kod": "C1",
+                      "cari_ad": "TEK MÜŞTERİ", "sehir": "", "miktar": [10, 10, 80, 10, 10, 10, 10, 10],
+                      "net_tutar": [100.0, 100, 640, 100, 100, 100, 100, 100], "maliyet_tutar": 50.0, "fatura_no": list("abcdefgh"),
+                      "iade": False})
+    s["yil_ay"] = s["tarih"].dt.strftime("%Y-%m")
+    s = detay._hazirla(s)
+    aylik = detay._aylik(s, aylar, "cari_ref").assign(alis_fiyat=float("nan"))
+    musteri = detay._kirilim(s, ["cari_kod", "cari_ad", "sehir"])
+    toplam = {"miktar": 150.0, "net_tutar": 1340.0, "ort_fiyat": 1340 / 150, "stok": 40.0, "marj": 0.5,
+              "son_satis": pd.Timestamp("2025-08-10")}
+    metin = " | ".join(b["metin"] for b in detay._urun_bulgulari(s, aylik, musteri, toplam, aylar))
+    assert "Mart 2025: 80 birim" in metin and "fiyat ortalamanın" in metin          # en yüksek ay ve düşük fiyat
+    assert "Tek müşteriye bağlı" in metin and "TEK MÜŞTERİ" in metin
+    assert "Son 4 aydır satışı yok" in metin and "40 birim stok" in metin
+
+
+def test_haric_tutma(depo, tmp_path):
+    """Hariç tutulan cari/fatura tüm analizlerden düşer, fatura listesinde işaretli kalır; geri alınca birebir döner."""
+    import shutil
+    from core import fatura, haric
+    yol = str(tmp_path / "a.sqlite")
+    shutil.copy(depo, yol)
+    once = Analiz(yol)
+    o1, m1 = once.ozet(), once.musteri_abc()
+    kod, tutar = m1.iloc[0].cari_kod, m1.iloc[0].net_tutar
+    assert haric.ekle(yol, "cari", "YOK") and haric.ekle(yol, "fatura", "01:999999999") and haric.ekle(yol, "x", "y")
+    assert Analiz(yol).ozet()["net_satis"] == pytest.approx(o1["net_satis"])       # hatalı ekleme hiçbir şeyi değiştirmez
+    assert haric.ekle(yol, "cari", kod, "grup şirketi") is None
+    a = Analiz(yol)
+    assert a.ozet()["net_satis"] == pytest.approx(o1["net_satis"] - tutar, abs=0.01)
+    assert kod not in set(a.musteri_abc()["cari_kod"]) and int(a.meta["haric_cari"]) == 1
+    assert any("Hesaplama dışı" in str(n[0]) for n in a.veri_notlari())
+    v = fatura.yukle(sqlite3.connect(yol))
+    f, _ = fatura.suz(v, fatura.Filtre())
+    assert fatura.ozet(f, None)["satis_net"] == pytest.approx(a.ozet()["net_satis"], abs=0.01)
+    hf, _ = fatura.suz(v, _filtre(durum="haric"))
+    assert len(hf) and set(hf["cari_kod"]) == {kod} and (hf["haric_neden"] == "Cari hariç tutuldu").all()
+    # tek fatura
+    r = f[~f["haric"] & ~f["iptal"] & f["trcode"].isin([7, 8])].iloc[0]
+    assert haric.ekle(yol, "fatura", r.anahtar) is None
+    assert Analiz(yol).ozet()["net_satis"] == pytest.approx(o1["net_satis"] - tutar - r.analiz_tutar, abs=0.01)
+    con = sqlite3.connect(yol)
+    l = haric.liste(con)
+    con.close()
+    assert set(l["tur"]) == {"cari", "fatura"} and l.set_index("tur").loc["fatura", "tutar"] == pytest.approx(r.analiz_tutar, abs=0.01)
+    assert "grup şirketi" in set(l["aciklama"])
+    haric.cikar(yol, "cari", kod); haric.cikar(yol, "fatura", r.anahtar)
+    son = Analiz(yol)
+    assert son.ozet()["net_satis"] == pytest.approx(o1["net_satis"], abs=0.001) and len(son.satis) == len(once.satis)
+    pd.testing.assert_frame_equal(son.musteri_abc(), m1)
+
+
+def test_kart_ve_haric_ekranlari(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import app as A
+    import openpyxl
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(600):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    a = A.Analiz(os.path.join(str(tmp_path), aid, "analiz.sqlite"))
+    uk, ck = a.urun_abc().iloc[0].malzeme_kod, a.musteri_abc().iloc[0].cari_kod
+    p = c.get(f"/panel/{aid}").get_data(as_text=True)
+    assert f"/urun/{aid}?kod=" in p and f"/cari/{aid}?kod=" in p and f"/ay/{aid}?ay=2025-03" in p and f"/ara/{aid}" in p
+    h = c.get(f"/urun/{aid}?kod={uk}&ay=2025-03&olcu=kar").get_data(as_text=True)
+    assert "Ne zaman satılmış, neden?" in h and "Mart 2025 — bu ürünü kimler aldı" in h and "cubuk-grafik" in h
+    h = c.get(f"/cari/{aid}?kod={ck}&ay=2025-03").get_data(as_text=True)
+    assert "Mart 2025 — ne aldı" in h and "Hesaplamadan çıkar" in h
+    assert "Fark nereden geliyor" in c.get(f"/ay/{aid}?ay=2025-03").get_data(as_text=True)
+    assert c.get(f"/urun/{aid}?kod=YOK").status_code == 404 and c.get(f"/ay/{aid}?ay=bozuk").status_code == 404
+    assert uk in c.get(f"/ara/{aid}?q={uk}").get_data(as_text=True)
+    # hariç tut -> panelde uyarı, cari kartında işaret; geri al
+    r = c.post(f"/haric/{aid}/ekle", data={"tur": "cari", "anahtar": f"{ck}\nYOK", "donus": "//kotu.example"})
+    assert r.status_code == 302 and r.headers["Location"].startswith(f"/haric/{aid}?hata=")
+    p = c.get(f"/panel/{aid}").get_data(as_text=True)
+    assert "1 cari ve 0 fatura hesaplama dışı" in p
+    assert "hesaplama dışı" in c.get(f"/cari/{aid}?kod={ck}").get_data(as_text=True)
+    assert "Geri al" in c.get(f"/haric/{aid}").get_data(as_text=True)
+    assert "hariç" in c.get(f"/faturalar/{aid}?durum=haric").get_data(as_text=True)
+    c.post(f"/haric/{aid}/cikar", data={"tur": "cari", "anahtar": ck})
+    assert "hesaplama dışı</b>" not in c.get(f"/panel/{aid}").get_data(as_text=True)
+    yol = tmp_path / "r.xlsx"
+    yol.write_bytes(c.get(f"/indir/{aid}/excel").data)
+    assert {"Ürün-Cari", "Ürün Aylık", "Cari Aylık"} <= set(openpyxl.load_workbook(yol, read_only=True).sheetnames)

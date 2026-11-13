@@ -13,10 +13,12 @@ import pandas as pd
 from .analiz import AbcEsik, Analiz, abc_ozet
 
 LACIVERT = "#1F3864"
+KIRILIM_SINIRI = 50_000        # Ürün-Cari / aylık pivot sayfalarındaki en fazla satır
 RAPOR_SATIR_SINIRI = 200_000   # Excel raporundaki fatura satırı sayfası (fazlası Faturalar ekranından indirilir)
 SINIF_RENK = {"A": "#C6EFCE", "B": "#FFEB9C", "C": "#F4CCCC"}
 
 BASLIK = {
+    "ort_fiyat": "Ort. net birim fiyat", "fatura_sayisi": "Fatura sayısı",
     "ciro_sinif": "Ciroya göre sınıf", "zarar": "Zarar",
     "sira": "Sıra", "sinif": "Sınıf", "malzeme_kod": "Malzeme kodu", "malzeme_ad": "Malzeme adı",
     "grup_kod": "Grup", "net_tutar": "Net tutar (TL)", "toplam_miktar": "Miktar", "pay": "Pay",
@@ -47,6 +49,7 @@ YUZDE = {"pay", "kumulatif_pay", "yillik_degisim", "kalem_payi", "deger_payi", "
          "gecikmis_pay", "iade_orani", "ambar_ici_pay"}
 SAYI = {"toplam_miktar", "satis_miktar", "miktar", "stok_miktar", "yillik_satis", "stok_gun", "oneri_miktar", "sessiz_gun", "en_eski_gun"}
 ONDALIK = {"devir_hizi", "gunluk_satis", "ort_aralik_gun"}
+PARA.add("ort_fiyat")
 DURUM_RENK = {"Kayıp": "sC", "Risk": "sB", "Acil": "sC", "Sipariş ver": "sB"}
 MALIYET_NOTU = ("Tahmini brüt kâr = net satış − (satış miktarı × o tarihteki son alış fiyatı). "
                 "Yönetim amaçlı tahmindir; muhasebe kârı değildir.")
@@ -340,6 +343,19 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
                                  "Satırlar ay, sütunlar ambar.", aa)
             for j in range(1, len(aa.columns)):
                 ws_aa.set_column(j, j, max(16, len(str(aa.columns[j])) + 2), f["para"])
+
+        # ---- ayrıntılı kırılımlar: ürün × cari, ürün ay ay, cari ay ay
+        _liste_sayfa(wb, f, "Ürün-Cari", "Hangi ürün hangi firmaya ne kadar satıldı",
+                     f"Net tutara göre sıralı; en büyük {KIRILIM_SINIRI:,} satır. Filtre düğmesiyle tek bir ürünü ya da cariyi seçin. "
+                     "Tek ürünün/carinin tamamı için programdaki ürün ve cari kartlarına bakın.".replace(",", "."),
+                     a.urun_cari(KIRILIM_SINIRI))
+        for seviye, deger, sayfa_ad, bas, acik in (
+                ("malzeme", "miktar", "Ürün Aylık", "Ürünlerin ay ay satış miktarı", "Satırlar ürün, sütunlar ay (ana birim miktar)."),
+                ("cari", "net_tutar", "Cari Aylık", "Carilerin ay ay net satışı (TL, KDV hariç)", "Satırlar cari, sütunlar ay.")):
+            pv = a.aylik_pivot(seviye, deger).head(KIRILIM_SINIRI)
+            ws_p = _liste_sayfa(wb, f, sayfa_ad, bas, acik + " Hangi ayda ne gitmiş, mevsimi olan ürünler buradan görülür.", pv)
+            for j in range(3, len(pv.columns)):
+                ws_p.set_column(j, j, 12, f["para" if deger == "net_tutar" else "sayi"])
 
         # ---- Faturalar (Logo ile sağlama: her fatura, tablo adı ve LOGICALREF ile)
         from . import fatura as fat

@@ -42,19 +42,19 @@
   <tr data-s="{{ r.sinif }}" data-ara="{{ (kod ~ ' ' ~ (r.malzeme_ad if tur == 'urun' else r.cari_ad))|lower }}">
     <td class="s soluk">{{ r.sira }}</td><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
     {% if olcut == 'kar' %}
-    <td>{{ r.malzeme_ad if tur == 'urun' else r.cari_ad }}{% if r.zarar %} <span class="rozet rC">zarar</span>{% endif %}<div class="kucuk soluk">{{ kod }}</div></td>
+    <td><a href="/{{ 'urun' if tur == 'urun' else 'cari' }}/{{ aid }}?kod={{ kod|urlencode }}">{{ r.malzeme_ad if tur == 'urun' else r.cari_ad }}</a>{% if r.zarar %} <span class="rozet rC">zarar</span>{% endif %}<div class="kucuk soluk">{{ kod }}</div></td>
     <td>{{ r.grup_kod if tur == 'urun' else r.sehir }}</td>
     <td class="s"><b>{{ r.brut_kar|tl(2) }}</b></td><td class="s">{{ r.kar_marji|yuzde }}</td>
     <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.maliyet|tl(2) }}</td>
     <td>{% if r.ciro_sinif != '-' %}<span class="rozet r{{ r.ciro_sinif }}">{{ r.ciro_sinif }}</span>{% endif %}</td>
     {% elif tur == 'urun' %}
-    <td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }}</div></td><td>{{ r.grup_kod }}</td>
+    <td><a href="/urun/{{ aid }}?kod={{ kod|urlencode }}">{{ r.malzeme_ad }}</a><div class="kucuk soluk">{{ r.malzeme_kod }}</div></td><td>{{ r.grup_kod }}</td>
     <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.toplam_miktar|tl(2) }}</td>
     {% elif tur == 'musteri' %}
-    <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td><td>{{ r.sehir }}</td>
+    <td><a href="/cari/{{ aid }}?kod={{ kod|urlencode }}">{{ r.cari_ad }}</a><div class="kucuk soluk">{{ r.cari_kod }}</div></td><td>{{ r.sehir }}</td>
     <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.fatura_sayisi|tl }}</td><td>{{ r.son_alim }}</td>
     {% else %}
-    <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td><td>{{ r.sehir }}</td><td class="s">{{ r.net_tutar|tl(2) }}</td>
+    <td><a href="/cari/{{ aid }}?kod={{ kod|urlencode }}">{{ r.cari_ad }}</a><div class="kucuk soluk">{{ r.cari_kod }}</div></td><td>{{ r.sehir }}</td><td class="s">{{ r.net_tutar|tl(2) }}</td>
     {% endif %}
     <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td>
     {% if fatura_var %}<td><a class="kucuk" href="/faturalar/{{ aid }}?{{ 'urun_kod' if tur == 'urun' else 'cari_kod' }}={{ kod|urlencode }}{{ turq }}{{ aq }}">Faturalar ›</a></td>{% endif %}

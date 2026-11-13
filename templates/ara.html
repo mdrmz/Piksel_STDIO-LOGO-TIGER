@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block baslik %}Ara — {{ bilgi.firma }}{% endblock %}
+{% block icerik %}
+<p class="kucuk"><a href="/panel/{{ aid }}">‹ Panel</a></p>
+<h1>Ürün ya da cari ara</h1>
+<form method="get" style="display:flex;gap:8px;max-width:560px;margin:12px 0"><input type="text" name="q" value="{{ q }}" placeholder="kod ya da ad" autofocus><button class="btn">Ara</button></form>
+{% if q %}
+<div class="izgara i2">
+  <div><h2>Ürünler <span class="soluk kucuk">({{ s.urun_say }})</span></h2><div class="kart" style="padding:8px 12px"><table>
+    {% for r in s.urun.itertuples() %}<tr><td><a href="/urun/{{ aid }}?kod={{ r.kod|urlencode }}">{{ r.ad or r.kod }}</a><div class="kucuk soluk">{{ r.kod }} · {{ r.ek }}</div></td></tr>
+    {% else %}<tr><td class="soluk">Eşleşen ürün yok.</td></tr>{% endfor %}</table></div></div>
+  <div><h2>Cariler <span class="soluk kucuk">({{ s.cari_say }})</span></h2><div class="kart" style="padding:8px 12px"><table>
+    {% for r in s.cari.itertuples() %}<tr><td><a href="/cari/{{ aid }}?kod={{ r.kod|urlencode }}">{{ r.ad or r.kod }}</a><div class="kucuk soluk">{{ r.kod }} · {{ r.ek }}</div></td></tr>
+    {% else %}<tr><td class="soluk">Eşleşen cari yok.</td></tr>{% endfor %}</table></div></div>
+</div>
+<p class="kucuk soluk">Her listede ilk 30 sonuç; daha fazlası için aramayı daraltın.</p>
+{% endif %}
+{% endblock %}

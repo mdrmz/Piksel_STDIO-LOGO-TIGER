@@ -77,6 +77,8 @@ OLCU = {  # tablo -> [(ad, DAX, biçim)]
         ("Fatura Sayısı", "CALCULATE(DISTINCTCOUNT('Satış'[Fatura No]), 'Satış'[İade] = FALSE())", SAYI),
         ("Müşteri Sayısı", "DISTINCTCOUNT('Satış'[cari_ref])", SAYI),
         ("Satış Miktarı", "SUM('Satış'[Miktar])", SAYI),
+        ("Ortalama Birim Fiyat", "DIVIDE(SUM('Satış'[Net Tutar]), SUM('Satış'[Miktar]))", "#,0.00"),
+        ("Ürün Çeşidi", "DISTINCTCOUNT('Satış'[malzeme_ref])", SAYI),
         ("Ortalama Fatura", "DIVIDE([Net Satış] + [İade Tutarı], [Fatura Sayısı])", TL)],
     "Alış": [("Net Alış", "SUM('Alış'[Net Tutar])", TL)],
     "Alacak": [("Alacak Bakiyesi", "SUM('Alacak'[bakiye])", TL), ("0-30 Gün", "SUM('Alacak'[g0_30])", TL),
@@ -157,7 +159,11 @@ def _deger(v):
     return {"expr": {"Literal": {"Value": v}}}
 
 
-def _gorsel(ad, tip, x, y, w, h, roller: dict, baslik=None, sirala=None, toplam=True):
+ACILIR = {"data": [{"properties": {"mode": {"expr": {"Literal": {"Value": "'Dropdown'"}}}}}],
+          "general": [{"properties": {"selfFilterEnabled": {"expr": {"Literal": {"Value": "true"}}}}}]}   # açılır liste + arama kutusu
+
+
+def _gorsel(ad, tip, x, y, w, h, roller: dict, baslik=None, sirala=None, toplam=True, nesne=None):
     """roller: rol -> [alan]; sirala: (alan, "artan"|"azalan"); toplam: tabloda toplam satırı gösterilsin mi"""
     takma, secim, proj = {}, [], {}
 
@@ -182,6 +188,8 @@ def _gorsel(ad, tip, x, y, w, h, roller: dict, baslik=None, sirala=None, toplam=
         tek["objects"] = {"labels": [{"properties": {"labelDisplayUnits": _deger("1D"), "fontSize": _deger("24D")}}]}
     elif tip == "tableEx" and not toplam:
         tek["objects"] = {"total": [{"properties": {"totals": _deger("false")}}]}
+    if nesne:
+        tek["objects"] = {**tek.get("objects", {}), **nesne}
     if baslik:
         metin = "'" + baslik.replace("'", "''") + "'"
         tek["vcObjects"] = {"title": [{"properties": {"show": {"expr": {"Literal": {"Value": "true"}}},
@@ -275,8 +283,44 @@ def _sayfalar() -> list:
                             O(S, "Net Satış"), O(S, "Fatura Sayısı"), O(S, "Kâr Marjı")]},
                 "Hangi ambardan hangi ürün ne kadar çıktı", (O(S, "Net Satış"), "azalan")),
     ]
+    # Detay sayfaları: soldan ürün/cari seçilir; grafikte bir aya tıklanınca alttaki tablolar o aya süzülür
+    def detay(onek, secim_alan, secim_baslik, kartlar, tablo_baslik, tablo_alanlar):
+        kw = (1280 - 24 - 316 - 5 * 16) / 6
+        return [_gorsel(f"{onek}_sec", "slicer", 24, 16, 300, 110, {"Values": [secim_alan]}, secim_baslik, nesne=ACILIR)] + [
+            _gorsel(f"{onek}_k{i}", "card", round(340 + i * (kw + 16)), 16, round(kw), 110, {"Values": [o]}) for i, o in enumerate(kartlar)] + [
+            _gorsel(f"{onek}_yil", "slicer", 24, 142, 300, 110, {"Values": [K("Takvim", "Yıl")]}, "Yıl"),
+            _gorsel(f"{onek}_mik", "clusteredColumnChart", 340, 142, 916, 250,
+                    {"Category": [K("Takvim", "Yıl-Ay")], "Y": [O(S, "Net Satış")]},
+                    "Aylık net satış — bir aya tıklayın, alttaki tablolar o aya süzülür", (K("Takvim", "Yıl-Ay"), "artan")),
+            _gorsel(f"{onek}_ay", "tableEx", 24, 268, 300, 436,
+                    {"Values": [K("Takvim", "Yıl-Ay"), O(S, "Satış Miktarı"), O(S, "Net Satış"), O(S, "Ortalama Birim Fiyat")]},
+                    "Ay ay", (K("Takvim", "Yıl-Ay"), "artan")),
+            _gorsel(f"{onek}_tablo", "tableEx", 340, 408, 916, 296, {"Values": tablo_alanlar}, tablo_baslik, (O(S, "Net Satış"), "azalan")),
+        ]
+    urun_detay = detay("ud", K("Malzeme", "Malzeme"), "Ürün seçin",
+                       [O(S, "Net Satış"), O(S, "Satış Miktarı"), O(S, "Ortalama Birim Fiyat"), O(S, "Brüt Kâr"), O(S, "Kâr Marjı"), O(S, "Müşteri Sayısı")],
+                       "Hangi firmaya ne kadar satıldı",
+                       [K("Cari", "Cari"), K("Cari", "Şehir"), O(S, "Satış Miktarı"), O(S, "Net Satış"), O(S, "Ortalama Birim Fiyat"),
+                        O(S, "Brüt Kâr"), O(S, "Kâr Marjı"), O(S, "Fatura Sayısı")])
+    cari_detay = detay("cd", K("Cari", "Cari"), "Cari seçin",
+                       [O(S, "Net Satış"), O(S, "Fatura Sayısı"), O(S, "Ortalama Fatura"), O(S, "Brüt Kâr"), O(S, "Kâr Marjı"), O(S, "Ürün Çeşidi")],
+                       "Hangi ürünü ne kadar aldı",
+                       [K("Malzeme", "Malzeme"), K("Malzeme", "Grup"), O(S, "Satış Miktarı"), O(S, "Net Satış"), O(S, "Ortalama Birim Fiyat"),
+                        O(S, "Brüt Kâr"), O(S, "Kâr Marjı"), O(S, "Fatura Sayısı")])
+    aylik_detay = _kartlar("ay", 16, [O(S, "Net Satış"), O(S, "Brüt Kâr"), O(S, "Kâr Marjı"), O(S, "Fatura Sayısı"),
+                                      O(S, "Müşteri Sayısı"), O(S, "Ürün Çeşidi")]) + [
+        _gorsel("ay_grafik", "clusteredColumnChart", 24, 142, 1000, 240, {"Category": [K("Takvim", "Yıl-Ay")], "Y": [O(S, "Net Satış")]},
+                "Aylık net satış — bir aya tıklayın: o ayın carileri ve ürünleri aşağıda", (K("Takvim", "Yıl-Ay"), "artan")),
+        _gorsel("ay_grup", "slicer", 1040, 142, 216, 240, {"Values": [K("Malzeme", "Grup")]}, "Malzeme grubu"),
+        _gorsel("ay_cari", "tableEx", 24, 398, 500, 306,
+                {"Values": [K("Cari", "Cari"), O(S, "Net Satış"), O(S, "Brüt Kâr"), O(S, "Fatura Sayısı")]},
+                "Cariler", (O(S, "Net Satış"), "azalan")),
+        _gorsel("ay_urun", "tableEx", 540, 398, 716, 306,
+                {"Values": [K("Malzeme", "Malzeme"), K("Malzeme", "Grup"), O(S, "Satış Miktarı"), O(S, "Net Satış"), O(S, "Ortalama Birim Fiyat"), O(S, "Brüt Kâr")]},
+                "Ürünler", (O(S, "Net Satış"), "azalan")),
+    ]
     sayfalar = [("Özet", ozet), ("Kârlılık", kar), ("Alacak", alacak), ("Müşteri ve Temsilci", musteri), ("Stok", stok),
-                ("Ambar", ambar)]
+                ("Ambar", ambar), ("Ürün Detay", urun_detay), ("Cari Detay", cari_detay), ("Aylık Detay", aylik_detay)]
     return [{"name": f"ReportSection{i + 1:02d}", "displayName": ad, "displayOption": 1, "width": 1280, "height": 720,
              "ordinal": i, "config": "{}", "filters": "[]", "visualContainers": gorseller} for i, (ad, gorseller) in enumerate(sayfalar)]
 

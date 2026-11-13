@@ -177,6 +177,42 @@ class Analiz:
         return t[on + ["brut_kar", "kar_marji", "net_tutar", "maliyet"] + (["toplam_miktar"] if seviye == "malzeme" else [])
                  + ["pay", "kumulatif_pay", "ciro_sinif", "zarar"]]
 
+    # ------------------------------------------------------------------ ayrıntılı kırılımlar (Excel)
+    def urun_cari(self, sinir: int | None = None):
+        """Hangi ürün hangi firmaya ne kadar satıldı (ürün × cari), net tutara göre sıralı."""
+        s = self.satis
+        g = s.groupby(["malzeme_ref", "cari_ref"], as_index=False).agg(
+            toplam_miktar=("miktar", "sum"), net_tutar=("net_tutar", "sum"),
+            maliyet=("maliyet_tutar", lambda x: x.sum(min_count=1)) if "maliyet_tutar" in s.columns else ("net_tutar", lambda x: np.nan),
+            fatura_sayisi=("fatura_no", "nunique"), son_satis=("tarih", "max"))
+        g["ort_fiyat"] = g["net_tutar"] / g["toplam_miktar"].where(g["toplam_miktar"] > 0)
+        g["brut_kar"] = g["net_tutar"] - g["maliyet"]
+        g = g.sort_values("net_tutar", ascending=False, kind="mergesort")
+        if sinir:
+            g = g.head(sinir)
+        g = (g.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
+              .merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left"))
+        g["son_satis"] = g["son_satis"].dt.date
+        return g[["malzeme_kod", "malzeme_ad", "grup_kod", "cari_kod", "cari_ad", "sehir", "toplam_miktar", "net_tutar",
+                  "ort_fiyat", "brut_kar", "fatura_sayisi", "son_satis"]]
+
+    def aylik_pivot(self, seviye: str = "malzeme", deger: str = "miktar"):
+        """Satırlar ürün (ya da cari), sütunlar ay: her ayın satış miktarı (ya da net tutarı) ve toplam."""
+        s = self.satis.assign(yil_ay=self.satis["tarih"].dt.strftime("%Y-%m"))
+        ref = "malzeme_ref" if seviye == "malzeme" else "cari_ref"
+        p = s.pivot_table(index=ref, columns="yil_ay", values=deger, aggfunc="sum", fill_value=0.0)
+        p.columns = [str(c) for c in p.columns]
+        aylar = list(p.columns)
+        p["Toplam"] = p[aylar].sum(axis=1)
+        p = p.sort_values("Toplam", ascending=False).reset_index()
+        if seviye == "malzeme":
+            p = p.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on=ref, how="left")
+            on = ["malzeme_kod", "malzeme_ad", "grup_kod"]
+        else:
+            p = p.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on=ref, how="left")
+            on = ["cari_kod", "cari_ad", "sehir"]
+        return p[on + ["Toplam"] + aylar]
+
     def tedarikci_abc(self, esik=None):
         t = abc(self.alis, "cari_ref", "net_tutar", esik)
         t = t.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")
@@ -601,6 +637,9 @@ class Analiz:
             ("Maliyeti bulunan satışların ciro payı", f"%{float(m.get('maliyet_kapsama') or 0) * 100:.1f}"
              if m.get("maliyet_kapsama") is not None else "hesaplanmadı (eski sürümle oluşturulmuş analiz)"),
             ("Cari bakiyelerin alındığı dönem", m.get("cari_hareket_donemi") or "cari hareket tablosu yok"),
+            *([("Hesaplama dışı bırakılanlar", f"{m.get('haric_cari', 0)} cari, {m.get('haric_fatura', 0)} fatura — "
+               f"net satıştan {float(m.get('haric_satis_tutar') or 0):,.0f} ₺, alıştan {float(m.get('haric_alis_tutar') or 0):,.0f} ₺ düşüldü"
+               .replace(",", "."))] if int(m.get("haric_cari") or 0) + int(m.get("haric_fatura") or 0) else []),
             ("Tutar tanımı", "KDV hariç net (VATMATRAH: satır + dağıtılmış dip indirim sonrası)"),
             ("Miktar tanımı", "Ana birim (koli/paket satırları ana birime çevrildi)"),
         ]

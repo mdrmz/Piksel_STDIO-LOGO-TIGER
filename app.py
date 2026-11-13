@@ -495,6 +495,9 @@ def panel(aid):
         abc=[("Ürün", abc_ozet(ku if olcut == "kar" else u, "brut_kar" if olcut == "kar" else "net_tutar")),
              ("Müşteri", abc_ozet(km if olcut == "kar" else m, "brut_kar" if olcut == "kar" else "net_tutar")),
              ("Tedarikçi", abc_ozet(t, "net_tutar"))],
+        aylar=[(r.yil_ay, float(r.net_satis)) for r in trend.itertuples()],
+        haric_say=(int(a.meta.get("haric_cari") or 0), int(a.meta.get("haric_fatura") or 0),
+                   float(a.meta.get("haric_satis_tutar") or 0)),
         olcut=olcut, kar_var=a.maliyet_var, urun=(ku if olcut == "kar" else u).head(15),
         musteri=(km if olcut == "kar" else m).head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
@@ -585,6 +588,7 @@ def fatura_sayfa(aid):
         abort(404)
     bas, satirlar = sonuc
     return render_template("fatura.html", aid=aid, bilgi=bilgi, f=bas, satirlar=satirlar, fark_esik=fatura.FARK_ESIK,
+                           buraya=request.full_path.rstrip("?"),
                            geri=request.referrer if request.referrer and "/faturalar/" in request.referrer else f"/faturalar/{aid}")
 
 
@@ -603,6 +607,110 @@ def abc_liste(aid, tur):
                            ozet=abc_ozet(t, "brut_kar" if olcut == "kar" else "net_tutar"),
                            ambar_secili=a.ambar_secili, ambar_secili_ad=a.ambar_secili_ad,
                            fatura_var=_fatura_var(a))
+
+
+# ---------------------------------------------------------------------------- ürün kartı, cari kartı, ay detayı, arama
+def _depo(aid):
+    klasor = _analiz_klasor(aid)
+    with open(os.path.join(klasor, "bilgi.json"), encoding="utf-8") as fh:
+        bilgi = json.load(fh)
+    return klasor, bilgi, os.path.join(klasor, "analiz.sqlite")
+
+
+def _ay_param():
+    ay = (request.args.get("ay") or "").strip()
+    return ay if re.fullmatch(r"\d{4}-\d{2}", ay) else None
+
+
+@app.route("/urun/<aid>")
+def urun_karti(aid):
+    from core import detay
+    klasor, bilgi, depo = _depo(aid)
+    k = detay.urun_karti(depo, request.args.get("kod", ""), _ay_param())
+    if k is None:
+        abort(404)
+    return render_template("urun.html", aid=aid, bilgi=bilgi, k=k, kod=k["m"]["malzeme_kod"], ay_ad=detay.ay_ad,
+                           fatura_var=_fatura_verisi(aid)[2] is not None)
+
+
+@app.route("/cari/<aid>")
+def cari_karti(aid):
+    from core import detay, haric
+    klasor, bilgi, depo = _depo(aid)
+    k = detay.cari_karti(depo, request.args.get("kod", ""), _ay_param())
+    if k is None:
+        abort(404)
+    alacak = None
+    try:
+        y = Analiz(depo).cari_yaslandirma("alacak")
+        if y is not None:
+            y = y[y["cari_kod"] == k["c"]["cari_kod"]]
+            alacak = y.iloc[0].to_dict() if len(y) else None
+    except Exception:
+        alacak = None
+    con = __import__("sqlite3").connect(depo)
+    try:
+        haric_ok = haric.destekli_mi(con)
+    finally:
+        con.close()
+    return render_template("cari.html", aid=aid, bilgi=bilgi, k=k, kod=k["c"]["cari_kod"], ay_ad=detay.ay_ad, alacak=alacak,
+                           fatura_var=haric_ok, haric_ok=haric_ok)
+
+
+@app.route("/ay/<aid>")
+def ay_sayfa(aid):
+    from core import detay
+    klasor, bilgi, depo = _depo(aid)
+    k = detay.ay_detayi(depo, _ay_param() or "")
+    if k is None:
+        abort(404)
+    return render_template("ay.html", aid=aid, bilgi=bilgi, k=k, ay_ad=detay.ay_ad, fatura_var=_fatura_verisi(aid)[2] is not None)
+
+
+@app.route("/ara/<aid>")
+def ara_sayfa(aid):
+    from core import detay
+    klasor, bilgi, depo = _depo(aid)
+    q = (request.args.get("q") or "").strip()
+    return render_template("ara.html", aid=aid, bilgi=bilgi, q=q, s=detay.ara(depo, q))
+
+
+# ---------------------------------------------------------------------------- hesaplama dışı bırakma
+@app.route("/haric/<aid>")
+def haric_sayfa(aid):
+    from core import haric
+    klasor, bilgi, depo = _depo(aid)
+    con = __import__("sqlite3").connect(depo)
+    try:
+        return render_template("haric.html", aid=aid, bilgi=bilgi, destekli=haric.destekli_mi(con), liste=haric.liste(con),
+                               hata=request.args.get("hata"))
+    finally:
+        con.close()
+
+
+@app.route("/haric/<aid>/<islem>", methods=["POST"])
+def haric_islem(aid, islem):
+    from urllib.parse import quote
+    from core import haric
+    klasor, bilgi, depo = _depo(aid)
+    tur = request.form.get("tur", "")
+    hatalar = []
+    if islem == "ekle":
+        anahtarlar = [x.strip() for x in re.split(r"[\n,;]+", request.form.get("anahtar", "")) if x.strip()]
+        if not anahtarlar:
+            hatalar.append("Kod yazın.")
+        for a in anahtarlar:
+            h = haric.ekle(depo, tur, a, request.form.get("aciklama", ""))
+            if h:
+                hatalar.append(h)
+    elif islem == "cikar":
+        haric.cikar(depo, tur, request.form.get("anahtar", ""))
+    else:
+        abort(404)
+    donus = request.form.get("donus") or ""
+    if hatalar or not donus.startswith("/") or donus.startswith("//"):
+        donus = f"/haric/{aid}" + (f"?hata={quote(' '.join(hatalar))}" if hatalar else "")
+    return redirect(donus)
 
 
 def _kayitli_yorum(klasor):
@@ -808,6 +916,8 @@ def mutlak(v):
 @app.template_filter("yuzde")
 def yuzde(v):
     try:
+        if float(v) != float(v):
+            return ""
         return f"%{float(v) * 100:.1f}".replace(".", ",")
     except (TypeError, ValueError):
         return ""

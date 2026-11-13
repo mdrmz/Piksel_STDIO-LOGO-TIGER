@@ -6,8 +6,15 @@
   tr.disarida td { color:#8A8F98; } .bilgi td:first-child { color:var(--soluk); width:210px; }
 </style>
 <p class="kucuk"><a href="{{ geri }}">‹ Fatura listesine dön</a></p>
-<h1>{{ f.tur }} · {{ f.fatura_no or '(no yok)' }}{% if f.iptal %} <span class="rozet rC">İPTAL</span>{% endif %}</h1>
-<div class="soluk">{{ f.tarih.strftime('%d.%m.%Y') if f.tarih == f.tarih else '' }} · {{ f.cari_ad }} ({{ f.cari_kod }}) · {{ f.ambar_ad }}</div>
+<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start"><div>
+<h1>{{ f.tur }} · {{ f.fatura_no or '(no yok)' }}{% if f.iptal %} <span class="rozet rC">İPTAL</span>{% endif %}{% if f.haric %} <span class="rozet rB">HESAPLAMA DIŞI</span>{% endif %}</h1>
+<div class="soluk">{{ f.tarih.strftime('%d.%m.%Y') if f.tarih == f.tarih else '' }} · <a href="/cari/{{ aid }}?kod={{ f.cari_kod|urlencode }}">{{ f.cari_ad }}</a> ({{ f.cari_kod }}) · {{ f.ambar_ad }}</div></div>
+{% if not f.iptal and f.haric_neden != 'Cari hariç tutuldu' %}<form method="post" action="/haric/{{ aid }}/{{ 'cikar' if f.haric else 'ekle' }}">
+  <input type="hidden" name="tur" value="fatura"><input type="hidden" name="anahtar" value="{{ f.anahtar }}"><input type="hidden" name="donus" value="{{ buraya }}">
+  <button class="btn {{ 'ikincil' if f.haric else 'sil' }}" title="Bu faturayı ciro, kâr, ABC ve raporlardan çıkarır; geri alınabilir">{{ 'Hesaplamaya geri al' if f.haric else 'Hesaplamadan çıkar' }}</button></form>{% endif %}
+</div>
+{% if f.haric %}<div class="uyari" style="margin-top:10px">{{ f.haric_neden }}: bu fatura hiçbir analize girmiyor.
+  {% if f.haric_neden == 'Cari hariç tutuldu' %}Geri almak için <a href="/cari/{{ aid }}?kod={{ f.cari_kod|urlencode }}">cari kartına</a> gidin.{% endif %}</div>{% endif %}
 
 <div class="izgara i2" style="margin-top:16px">
   <div class="kart"><h3>Logo'da bulmak için</h3><table class="bilgi">
@@ -40,7 +47,7 @@
   <tr><th>Malzeme</th><th>Satır tipi</th><th class="s">Miktar</th><th class="s">Birim fiyat</th><th class="s" title="İndirimler düşülmüş, KDV hariç: tutar ÷ miktar">Net birim fiyat</th><th class="s">Tutar (KDV hariç)</th><th>Durum</th><th>Logo kaydı</th></tr>
   {% for s in satirlar.itertuples() %}
   <tr class="{{ '' if s.durum == 'Analizde' else 'disarida' }}">
-    <td>{{ s.malzeme_ad if s.malzeme_ad == s.malzeme_ad else '' }}<div class="kucuk soluk">{{ s.malzeme_kod if s.malzeme_kod == s.malzeme_kod else '' }}</div></td>
+    <td>{% if s.malzeme_kod == s.malzeme_kod and s.malzeme_kod %}<a href="/urun/{{ aid }}?kod={{ s.malzeme_kod|urlencode }}">{{ s.malzeme_ad }}</a>{% endif %}<div class="kucuk soluk">{{ s.malzeme_kod if s.malzeme_kod == s.malzeme_kod else '' }}</div></td>
     <td>{{ s.satir_tipi }}</td><td class="s">{{ s.miktar|tl(2) }}</td><td class="s">{{ s.birim_fiyat|tl(2) }}</td><td class="s">{{ s.net_birim_fiyat|tl(2) }}</td>
     <td class="s">{{ s.net_tutar|tl(2) }}</td>
     <td>{% if s.durum == 'Analizde' %}<span class="rozet rA">Analizde</span>{% else %}<span class="kucuk">{{ s.durum }}</span>{% endif %}</td>

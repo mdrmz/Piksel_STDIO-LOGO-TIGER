@@ -1,5 +1,31 @@
 # Değişiklik günlüğü
 
+## v0.8.0 — 2026-11-13
+Ürün ve cari kartları, aya tıklayıp içine inme, hesaplama dışı bırakma.
+- **Ürün kartı:** panelde ya da listelerde bir ürüne tıklayınca açılır (ya da arama kutusundan). Aylara göre satış
+  (miktar / tutar / kâr / birim fiyat) tıklanabilir grafikle; bir aya tıklayınca **o ay bu ürünü hangi müşteriler
+  aldı** açılır. Hangi firmaya ne kadar satıldığı, müşteri bazında birim fiyat (ortalamanın %10 altı kırmızı),
+  ay ay satış ve alış fiyatı, kimden alındığı.
+- **"Ne zaman satılmış, neden?" bulguları** (otomatik): en çok gittiği aylar ve o ayın nedeni (tek müşteri mi, yayılmış mı,
+  fiyat düşük müydü), her yıl tekrarlayan mevsim, tek müşteriye bağımlılık, son 6 ayın önceki 6 aya göre artışı/düşüşü
+  ve bunun hangi müşterilerden geldiği, aylardır satılmayan ürün, marj erimesi (alış fiyatı artmış, satış fiyatı
+  yetişmemiş), ortalamanın çok altında fiyat alan müşteri. Bulgular verideki örüntülerden çıkar; kampanya, ihale gibi
+  dış nedenleri bilemez.
+- **Cari kartı:** aynısının müşteri tarafı: aylara göre alım, bir aya tıklayınca o ay ne aldığı, aldığı ürünler ve
+  diğer müşterilere göre fiyat farkı, malzeme grubu dağılımı, alacak, bulgular.
+- **Ay detayı:** panelde aylık grafiğin altındaki ay düğmeleri. O ayın satışını hangi cariler ve ürünler oluşturdu;
+  önceki aya ve geçen yılın aynı ayına göre farkı en çok artıran / düşüren müşteriler.
+- **Hesaplama dışı bırakma:** seçilen cariler (cari kartından ya da kod listesiyle) ve tek tek faturalar (fatura
+  detayından) ciro, kâr, ABC, kartlar, Excel, Power BI paketi ve yapay zekâ cevaplarından çıkarılır. Hiçbir şey silinmez,
+  geri alınabilir; panelde kaç kaydın ve ne kadar tutarın düşüldüğü yazar. Stok ve cari bakiye/alacak etkilenmez.
+  Hariç tutulan faturalar fatura listesinde "hariç" işaretiyle durur.
+- **Arama:** panelde ürün ya da cari arama kutusu.
+- **Power BI raporu:** üç yeni sayfa. **Ürün Detay** ve **Cari Detay** (soldan ürün/cari seçilir; aylık grafik, ay ay
+  tablo, hangi firmaya/hangi ürün tablosu) ve **Aylık Detay** (aylık grafik + cariler + ürünler). Grafikte bir aya
+  tıklanınca sayfadaki tablolar o aya süzülür. Yeni ölçüler: Ortalama Birim Fiyat, Ürün Çeşidi.
+- **Excel raporu:** **Ürün-Cari** (hangi ürün hangi firmaya ne kadar), **Ürün Aylık** ve **Cari Aylık** sayfaları.
+- Listelerdeki ürün ve müşteri adları artık kartlarına gider; faturalarına kartın içinden ya da "Faturalar ›" ile ulaşılır.
+
 ## v0.7.1 — 2026-11-13
 - **ABC artık kârlılığa göre:** ürün ve müşteri ABC'sinde A sınıfı, tahmini brüt kârın çoğunu (ilk %80) getirenlerdir
   (önceden net satış tutarına göreydi). Panelde ve tam listede brüt kâr, marj, net satış ve maliyet birlikte görünür;

@@ -89,6 +89,15 @@ def yukle(con) -> Veri:
     f["isaret"] = f["trcode"].map(ISARET).fillna(0).astype(int)
     f["logo_tablo"] = "LG_" + f["firma"].astype(str) + "_" + f["logo_donem"].astype(str) + "_INVOICE"
     f["anahtar"] = f["donem"].astype(str) + ":" + f["fatura_ref"].astype(str)
+    # hesaplama dışı bırakılanlar (core/haric.py): listede görünür, toplamlara ve analize girmez
+    from . import haric as _haric
+    hc, hf = _haric.anahtarlar(con)
+    f["haric_neden"] = ""
+    f.loc[f["cari_kod"].isin(hc) & (f["cari_kod"] != ""), "haric_neden"] = "Cari hariç tutuldu"
+    f.loc[f["anahtar"].isin(hf), "haric_neden"] = "Fatura hariç tutuldu"
+    f["haric"] = f["haric_neden"] != ""
+    hs = (s["donem"].astype(str) + ":" + s["fatura_ref"].astype(str)).isin(set(f.loc[f["haric"], "anahtar"]))
+    s.loc[hs & (s["durum"] == "Analizde"), "durum"] = "Hariç tutuldu"
     s = s.merge(mal, on="malzeme_ref", how="left")
     s["net_birim_fiyat"] = (s["net_tutar"] / s["miktar"].where(s["miktar"] != 0)).round(4)
     return Veri(f, s, mal, ambarlar=ambar.sort_values("ambar").to_dict("records"))
@@ -123,7 +132,7 @@ class Filtre:
     urun_kod: str = ""       # tam kod (ABC'den gelir)
     ambar: int | None = None
     no: str = ""             # fatura no / belge no içinde arama
-    durum: str = "tum"       # tum | gecerli | iptal | fark | disarida
+    durum: str = "tum"       # tum | gecerli | iptal | fark | disarida | haric
     sirala: str = "tarih"
     yon: str = "azalan"
 
@@ -136,7 +145,7 @@ class Filtre:
                    cari_kod=args.get("cari_kod", "").strip(), urun=args.get("urun", "").strip(),
                    urun_kod=args.get("urun_kod", "").strip(),
                    ambar=int(amb) if amb.lstrip("-").isdigit() else None, no=args.get("no", "").strip(),
-                   durum=args.get("durum", "tum") if args.get("durum") in ("tum", "gecerli", "iptal", "fark", "disarida") else "tum",
+                   durum=args.get("durum", "tum") if args.get("durum") in ("tum", "gecerli", "iptal", "fark", "disarida", "haric") else "tum",
                    sirala=sirala if sirala in SIRALANABILIR else "tarih",
                    yon="artan" if args.get("yon") == "artan" else "azalan")
 
@@ -198,6 +207,8 @@ def suz(v: Veri, fl: Filtre) -> tuple[pd.DataFrame, pd.DataFrame | None]:
         m &= f["fark"].abs() > FARK_ESIK
     elif fl.durum == "disarida":
         m &= f["disarida_satir"] > 0
+    elif fl.durum == "haric":
+        m &= f["haric"]
     sonuc = f[m].sort_values([fl.sirala, "fatura_ref"], ascending=fl.yon == "artan", kind="mergesort")
     if urun_s is not None:
         urun_s = urun_s[(urun_s["donem"].astype(str) + ":" + urun_s["fatura_ref"].astype(str)).isin(set(sonuc["anahtar"]))]
@@ -210,10 +221,10 @@ def suz(v: Veri, fl: Filtre) -> tuple[pd.DataFrame, pd.DataFrame | None]:
 
 def ozet(f: pd.DataFrame, urun_s: pd.DataFrame | None) -> dict:
     """Filtreye uyan faturaların toplamları (iptaller hariç). Tutarlar KDV hariç, iadeler eksi."""
-    g = f[~f["iptal"]]
+    g = f[~f["iptal"] & ~f["haric"]]
     tutar = g["analiz_tutar"] * g["isaret"]
     o = {
-        "fatura": int(len(f)), "iptal": int(f["iptal"].sum()), "fark": int((f["fark"].abs() > FARK_ESIK).sum()),
+        "fatura": int(len(f)), "iptal": int(f["iptal"].sum()), "haric": int((f["haric"] & ~f["iptal"]).sum()), "fark": int((f["fark"].abs() > FARK_ESIK).sum()),
         "satis_net": float(tutar[g["trcode"].isin(SATIS_TR)].sum()),
         "satis_brut": float(g.loc[g["trcode"].isin((7, 8)), "analiz_tutar"].sum()),
         "satis_iade": float(g.loc[g["trcode"].isin((2, 3)), "analiz_tutar"].sum()),
@@ -247,7 +258,7 @@ FATURA_KOLON = [
     ("miktar", "Miktar"), ("analiz_tutar", "KDV hariç tutar (analiz, TL)"),
     ("logo_matrah", "Logo KDV hariç (NETTOTAL-TOTALVAT)"), ("logo_kdv", "Logo KDV"),
     ("logo_net", "Logo genel toplam (NETTOTAL)"), ("fark", "Fark (TL)"), ("disarida_satir", "Analiz dışı satır"),
-    ("iptal", "İptal"), ("aciklama", "Açıklama"), ("logo_tablo", "Logo tablosu"), ("fatura_ref", "LOGICALREF"),
+    ("iptal", "İptal"), ("haric_neden", "Hesaplama dışı"), ("aciklama", "Açıklama"), ("logo_tablo", "Logo tablosu"), ("fatura_ref", "LOGICALREF"),
 ]
 SATIR_KOLON = [
     ("tarih", "Tarih"), ("fatura_no", "Fatura no"), ("tur", "Fatura türü"), ("cari_kod", "Cari kodu"),

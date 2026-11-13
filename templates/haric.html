@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block baslik %}Hesaplama dışı — {{ bilgi.firma }}{% endblock %}
+{% block icerik %}
+<p class="kucuk"><a href="/panel/{{ aid }}">‹ Panel</a></p>
+<h1>Hesaplama dışı bırakılanlar</h1>
+<p class="soluk" style="max-width:820px">Buraya eklediğiniz carilerin ve faturaların satış ve alışları ciroya, kâra, ABC'ye, ürün/cari kartlarına, Excel raporuna,
+  Power BI paketine ve yapay zekâ cevaplarına <b>girmez</b>. Örnek: grup içi şirketler, ortak carisi, tek seferlik demirbaş satışı.
+  Hiçbir şey silinmez; listeden çıkarınca geri gelir. Stok ve cari bakiye/alacak (Logo'daki gerçek durum) etkilenmez.</p>
+{% if hata %}<div class="uyari" style="margin:12px 0">{{ hata }}</div>{% endif %}
+{% if not destekli %}
+<div class="uyari">Bu analiz programın önceki bir sürümüyle oluşturulmuş. Logo yedeğini yeniden seçip analizi baştan oluşturun.</div>
+{% else %}
+<div class="izgara i2" style="margin-top:8px">
+  <form class="kart" method="post" action="/haric/{{ aid }}/ekle">
+    <h3>Cari ekle</h3><input type="hidden" name="tur" value="cari">
+    <label>Cari kodları (her satıra bir kod; birden çok yazabilirsiniz)</label>
+    <textarea name="anahtar" rows="4" placeholder="120.01.001&#10;120.01.002"></textarea>
+    <label>Neden (isteğe bağlı)</label><input type="text" name="aciklama" placeholder="ör. grup şirketi">
+    <p style="margin:12px 0 0"><button class="btn">Hesaplamadan çıkar</button>
+      <span class="kucuk soluk" style="margin-left:8px">Kodu bilmiyorsanız <a href="/ara/{{ aid }}">arayın</a>; cari kartındaki düğmeyle de çıkarabilirsiniz.</span></p>
+  </form>
+  <div class="kart"><h3>Fatura çıkarmak için</h3>
+    <p class="kucuk" style="margin:0"><a href="/faturalar/{{ aid }}">Faturalar</a> ekranından faturayı açın ve <b>Hesaplamadan çıkar</b> düğmesine basın.
+    Hariç tutulan faturalar listede <span class="rozet rB">hariç</span> işaretiyle durur; "Durum: Hesaplama dışı bırakılanlar" filtresiyle hepsini görürsünüz.</p></div>
+</div>
+<h2>Liste <span class="soluk kucuk">({{ liste|length }})</span></h2>
+<div class="kart" style="padding:8px 12px"><table>
+  <tr><th>Tür</th><th>Kayıt</th><th>Neden</th><th class="s">Düşülen tutar (KDV hariç)</th><th>Eklendi</th><th></th></tr>
+  {% for r in liste.itertuples() %}
+  <tr><td>{{ 'Cari' if r.tur == 'cari' else 'Fatura' }}</td>
+    <td>{% if r.tur == 'cari' %}<a href="/cari/{{ aid }}?kod={{ r.anahtar|urlencode }}">{{ r.ad or r.anahtar }}</a><div class="kucuk soluk">{{ r.anahtar }}</div>
+        {% else %}{% set d, ref = r.anahtar.split(':') %}<a href="/fatura/{{ aid }}?d={{ d|urlencode }}&r={{ ref }}">{{ r.ad or r.anahtar }}</a>{% endif %}</td>
+    <td>{{ r.aciklama or '' }}</td><td class="s">{{ r.tutar|tl(2) }}</td><td class="kucuk soluk">{{ r.zaman }}</td>
+    <td><form method="post" action="/haric/{{ aid }}/cikar"><input type="hidden" name="tur" value="{{ r.tur }}"><input type="hidden" name="anahtar" value="{{ r.anahtar }}">
+      <button class="btn kucuk ikincil">Geri al</button></form></td></tr>
+  {% else %}<tr><td colspan="6" class="soluk">Hesaplama dışı bırakılan kayıt yok.</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

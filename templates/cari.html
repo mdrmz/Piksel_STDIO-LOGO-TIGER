@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_parca.html" as p %}
+{% block baslik %}{{ k.c.cari_ad }} — cari kartı{% endblock %}
+{% block icerik %}
+{{ p.stil() }}
+{% set temel = '/cari/' ~ aid ~ '?kod=' ~ (kod|urlencode) %}
+{% set olcu = request.args.get('olcu', 'net_tutar') %}{% set olcu = olcu if olcu in ['net_tutar', 'kar', 'fatura'] else 'net_tutar' %}
+{% set t = k.toplam %}
+<p class="kucuk"><a href="/panel/{{ aid }}">‹ Panel</a> · <a href="/abc/{{ aid }}/musteri">Müşteri listesi</a></p>
+<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start">
+  <div><h1>{{ k.c.cari_ad or k.c.cari_kod }}{% if k.haric %} <span class="rozet rC">hesaplama dışı</span>{% endif %}</h1>
+    <div class="soluk">{{ k.c.cari_kod }}{% if k.c.sehir %} · {{ k.c.sehir }}{% endif %} · cari kartı</div></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    {% if fatura_var %}<a class="btn ikincil" href="/faturalar/{{ aid }}?cari_kod={{ kod|urlencode }}">Faturaları</a>{% endif %}
+    {% if haric_ok %}<form method="post" action="/haric/{{ aid }}/{{ 'cikar' if k.haric else 'ekle' }}"
+        onsubmit="return confirm('{{ 'Bu cari yeniden hesaplamalara dahil edilsin mi?' if k.haric else 'Bu carinin tüm satış ve alışları ciro, kâr, ABC ve raporlardan çıkarılsın mı? İstediğiniz zaman geri alabilirsiniz.' }}')">
+      <input type="hidden" name="tur" value="cari"><input type="hidden" name="anahtar" value="{{ kod }}"><input type="hidden" name="donus" value="{{ temel }}">
+      <button class="btn {{ 'ikincil' if k.haric else 'sil' }}">{{ 'Hesaplamaya geri al' if k.haric else 'Hesaplamadan çıkar' }}</button></form>{% endif %}
+  </div>
+</div>
+{% if k.haric %}<div class="uyari" style="margin-top:12px">Bu cari <b>hesaplama dışı</b> bırakıldı: satış ve alışları ciroya, kâra, ABC'ye ve raporlara girmiyor;
+  bu yüzden aşağıda satış görünmez. Faturaları <a href="/faturalar/{{ aid }}?cari_kod={{ kod|urlencode }}">fatura listesinde</a> durur.</div>{% endif %}
+
+<div class="izgara i4" style="margin-top:16px">
+  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ t.net_tutar|tl }} ₺</div>
+    <div class="kucuk soluk">{{ t.fatura|tl }} fatura{% if t.ort_fatura %} · ortalama {{ t.ort_fatura|tl }} ₺{% endif %}</div></div>
+  <div class="kart kpi"><div class="ad">Tahmini brüt kâr</div><div class="deger">{% if t.kar is not none %}{{ t.kar|tl }} ₺{% else %}–{% endif %}</div>
+    <div class="kucuk soluk">{% if t.marj is not none %}marj {{ t.marj|yuzde }}{% else %}maliyet verisi yok{% endif %}{% if t.iade %} · iade {{ t.iade|tl }} ₺{% endif %}</div></div>
+  <div class="kart kpi"><div class="ad">Alacak (KDV dahil)</div><div class="deger">{% if alacak %}{{ alacak.bakiye|tl }} ₺{% else %}–{% endif %}</div>
+    <div class="kucuk soluk">{% if alacak %}60 günü aşan {{ (alacak.g61_90 + alacak.g91_180 + alacak.g180p)|tl }} ₺{% else %}açık alacak yok{% endif %}</div></div>
+  <div class="kart kpi"><div class="ad">Ürün çeşidi</div><div class="deger">{{ t.urun|tl }}</div>
+    <div class="kucuk soluk">son alım {{ t.son_alim.strftime('%d.%m.%Y') if t.son_alim else '–' }}{% if t.alis %} · ondan alış {{ t.alis|tl }} ₺{% endif %}</div></div>
+</div>
+
+<h2>Ne zaman almış, ne almış?</h2>
+<div class="kart">{{ p.bulgular(k.bulgular, temel ~ '&olcu=' ~ olcu) }}</div>
+
+<h2>Aylara göre <span class="olcu-sec kucuk" style="font-weight:400;margin-left:8px">
+  {% for o, ad in [('net_tutar','Tutar'),('kar','Kâr'),('fatura','Fatura sayısı')] %}
+  <a class="btn kucuk {{ '' if olcu == o else 'ikincil' }}" href="{{ temel }}&olcu={{ o }}{{ '&ay=' ~ k.ay if k.ay else '' }}">{{ ad }}</a>{% endfor %}</span></h2>
+<div class="kart">{{ p.cubuk(k.aylik, olcu, temel ~ '&olcu=' ~ olcu, k.ay, 'fatura' if olcu == 'fatura' else '₺') }}
+  <p class="kucuk soluk" style="margin:8px 0 0">Bir aya tıklayın: o ay hangi ürünleri almış, aşağıda açılır.</p></div>
+
+{% if k.ay_detay is not none %}
+<h2 id="ay">{{ ay_ad(k.ay) }} — ne aldı <a class="kucuk" style="font-weight:400" href="{{ temel }}&olcu={{ olcu }}">✕ kapat</a>
+  {% if fatura_var %}<a class="kucuk" style="font-weight:400;margin-left:10px" href="/faturalar/{{ aid }}?cari_kod={{ kod|urlencode }}&bas={{ k.ay }}-01&bit={{ k.ay }}-31">o ayın faturaları ›</a>{% endif %}</h2>
+<div class="kart tr-tikla" style="padding:8px 12px;border-color:#BFD3F2;max-height:480px;overflow:auto"><table>
+  <tr><th>Ürün</th><th class="s">Miktar</th><th class="s">Tutar</th><th class="s">Ay içi pay</th><th class="s">Birim fiyat</th><th class="s">Kâr</th></tr>
+  {% for r in k.ay_detay.itertuples() %}
+  <tr data-href="/urun/{{ aid }}?kod={{ r.malzeme_kod|urlencode }}"><td><a href="/urun/{{ aid }}?kod={{ r.malzeme_kod|urlencode }}">{{ r.malzeme_ad or r.malzeme_kod }}</a><div class="kucuk soluk">{{ r.malzeme_kod }} · {{ r.grup_kod }}</div></td>
+    <td class="s">{{ r.miktar|tl(2) }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.ort_fiyat|tl(2) }}</td><td class="s">{{ r.kar|tl }}</td></tr>
+  {% else %}<tr><td colspan="6" class="soluk">Bu ay alım yok.</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<div class="izgara i2">
+  <div><h2>Aldığı ürünler <span class="soluk kucuk">({{ k.urun|length }})</span></h2>
+  <div class="kart tr-tikla" style="padding:8px 12px;max-height:560px;overflow:auto"><table>
+    <tr><th>Ürün</th><th class="s">Miktar</th><th class="s">Tutar</th><th class="s">Pay</th><th class="s">Birim fiyat</th><th class="s" title="Diğer müşterilere satış ortalamasına göre">Fiyat farkı</th><th class="s">Marj</th></tr>
+    {% for r in k.urun.head(300).itertuples() %}
+    <tr data-href="/urun/{{ aid }}?kod={{ r.malzeme_kod|urlencode }}"><td><a href="/urun/{{ aid }}?kod={{ r.malzeme_kod|urlencode }}">{{ r.malzeme_ad or r.malzeme_kod }}</a><div class="kucuk soluk">{{ r.malzeme_kod }}</div></td>
+      <td class="s">{{ r.miktar|tl }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.ort_fiyat|tl(2) }}</td>
+      <td class="s {{ 'eksi' if r.fiyat_farki == r.fiyat_farki and r.fiyat_farki <= -0.1 else ('arti' if r.fiyat_farki == r.fiyat_farki and r.fiyat_farki >= 0.1 else '') }}">{{ r.fiyat_farki|yuzde if r.fiyat_farki == r.fiyat_farki else '–' }}</td>
+      <td class="s">{{ r.marj|yuzde }}</td></tr>
+    {% else %}<tr><td colspan="7" class="soluk">Satış yok.</td></tr>{% endfor %}
+  </table></div>
+  <p class="kucuk soluk">Fiyat farkı: bu müşterinin ortalama fiyatı, aynı ürünün diğer müşterilere satış ortalamasından ne kadar farklı. Kırmızı: %10+ ucuz.</p></div>
+  <div><h2>Malzeme grubuna göre</h2>
+  <div class="kart" style="padding:8px 12px"><table>
+    <tr><th>Grup</th><th class="s">Tutar</th><th class="s">Pay</th><th class="s">Marj</th></tr>
+    {% for r in k.grup.head(15).itertuples() %}<tr><td>{{ r.grup_kod }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.marj|yuzde }}</td></tr>{% endfor %}
+  </table></div>
+  <h2>Ay ay tablo</h2>
+  <div class="kart tr-tikla" style="padding:8px 12px;max-height:380px;overflow:auto"><table>
+    <tr><th>Ay</th><th class="s">Tutar</th><th class="s">Fatura</th><th class="s">Ürün</th><th class="s">Kâr</th></tr>
+    {% for r in k.aylik.itertuples() %}
+    <tr data-href="{{ temel }}&olcu={{ olcu }}&ay={{ r.yil_ay }}#ay" class="{{ 'soluk' if r.net_tutar == 0 }}"><td>{{ r.ay_ad }}</td><td class="s">{{ r.net_tutar|tl }}</td>
+      <td class="s">{{ r.fatura|int }}</td><td class="s">{{ r.adet|int }}</td><td class="s">{{ r.kar|tl }}</td></tr>{% endfor %}
+  </table></div>
+  {% if k.alis_urun|length %}<h2>Ondan alınanlar <span class="soluk kucuk">(tedarikçi olarak)</span></h2>
+  <div class="kart" style="padding:8px 12px"><table><tr><th>Ürün</th><th class="s">Miktar</th><th class="s">Tutar</th></tr>
+    {% for r in k.alis_urun.head(10).itertuples() %}<tr><td><a href="/urun/{{ aid }}?kod={{ r.malzeme_kod|urlencode }}">{{ r.malzeme_ad or r.malzeme_kod }}</a></td><td class="s">{{ r.miktar|tl }}</td><td class="s">{{ r.net_tutar|tl }}</td></tr>{% endfor %}
+  </table></div>{% endif %}</div>
+</div>
+{% endblock %}

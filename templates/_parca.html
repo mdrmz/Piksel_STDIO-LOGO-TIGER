@@ -1,0 +1,38 @@
+{# Ortak parçalar: tıklanabilir aylık çubuk grafik ve bulgu listesi #}
+{% macro stil() %}
+<style>
+  .cubuk-grafik { display:flex; align-items:flex-end; gap:3px; height:190px; padding-top:22px; }
+  .cubuk-grafik a { flex:1; min-width:0; display:flex; flex-direction:column; height:100%; text-decoration:none; color:var(--soluk); position:relative; }
+  .cubuk-grafik a .alan { flex:1; min-height:0; display:flex; align-items:flex-end; }
+  .cubuk-grafik a .c { width:100%; background:#9DB5DC; border-radius:3px 3px 0 0; min-height:1px; transition:background .1s; }
+  .cubuk-grafik a:hover .c { background:var(--mavi); } .cubuk-grafik a.secili .c { background:var(--lacivert); }
+  .cubuk-grafik a.yilbasi { border-left:1px dashed #CBD2DC; padding-left:2px; }
+  .cubuk-grafik a .e { flex:none; font-size:10.5px; text-align:center; line-height:1.25; padding-top:3px; white-space:nowrap; overflow:hidden; }
+  .cubuk-grafik a.secili .e { color:var(--yazi); font-weight:600; }
+  .cubuk-grafik a .d { position:absolute; left:50%; transform:translateX(-50%); font-size:10px; white-space:nowrap; display:none; background:#111827; color:#fff; padding:2px 6px; border-radius:4px; z-index:2; top:0; }
+  .cubuk-grafik a:hover .d { display:block; }
+  .tr-tikla tr[data-href] { cursor:pointer; } .tr-tikla tr[data-href]:hover td { background:#F7F9FC; }
+  .olcu-sec a { margin-right:4px; }
+  .eksi { color:#B42318; } .arti { color:#1E6B2F; }
+</style>
+<script>document.addEventListener('click', e => { const tr = e.target.closest('tr[data-href]'); if (tr && !e.target.closest('a,button,form')) location.href = tr.dataset.href; });</script>
+{% endmacro %}
+
+{% macro cubuk(aylik, olcu, temel_url, secili, birim='₺', ondalik=0) %}
+{% set ns = namespace(mx=0) %}{% for r in aylik.itertuples() %}{% set v = r|attr(olcu) %}{% if v == v and v > ns.mx %}{% set ns.mx = v %}{% endif %}{% endfor %}
+<div class="cubuk-grafik">
+  {% for r in aylik.itertuples() %}{% set v = r|attr(olcu) %}{% set v = v if v == v else 0 %}
+  <a href="{{ temel_url }}{{ '&' if '?' in temel_url else '?' }}ay={{ r.yil_ay }}#ay" class="{{ 'secili' if r.yil_ay == secili }} {{ 'yilbasi' if r.yil_ay[5:] == '01' and not loop.first }}" title="{{ r.ay_ad }}: {{ v|tl(ondalik) }} {{ birim }} — tıklayın">
+    <span class="d">{{ r.ay_ad }}: {{ v|tl(ondalik) }} {{ birim }}</span>
+    <span class="alan"><span class="c" style="height:{{ (v / ns.mx * 100)|round(1) if ns.mx > 0 and v > 0 else 0 }}%"></span></span>
+    <span class="e">{{ r.ay_ad[:3] }}<br>{{ r.yil_ay[2:4] }}</span></a>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro bulgular(liste, temel_url) %}
+{% for b in liste %}
+<div class="one {{ 'dikkat' if b.tur == 'dikkat' else ('iyi' if b.tur == 'iyi' else '') }}">{{ b.metin }}
+  {% if b.ay %}<a class="kucuk" href="{{ temel_url }}{{ '&' if '?' in temel_url else '?' }}ay={{ b.ay }}#ay">o ayı aç ›</a>{% endif %}</div>
+{% endfor %}
+{% endmacro %}

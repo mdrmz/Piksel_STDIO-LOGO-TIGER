@@ -17,7 +17,7 @@
     <h1>Faturalar</h1>
     <div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }} · <a href="/panel/{{ aid }}">Panele dön</a></div>
   </div>
-  {% if v %}<div style="display:flex;gap:8px"><a class="btn" href="{{ excel_url }}">Excel'e indir{% if fl.aktif_mi() %} (filtreli){% endif %}</a></div>{% endif %}
+  {% if v %}<div style="display:flex;gap:8px"><a class="btn ikincil" href="/haric/{{ aid }}">Hesaplama dışı</a><a class="btn" href="{{ excel_url }}">Excel'e indir{% if fl.aktif_mi() %} (filtreli){% endif %}</a></div>{% endif %}
 </div>
 
 {% if not v %}
@@ -38,7 +38,7 @@
     <div><label>Fatura türü</label><div class="turler">
       {% for k, (ad, _) in tur_grup.items() %}<label><input type="checkbox" name="tur" value="{{ k }}" {{ 'checked' if k in fl.tur }}> {{ ad }}</label>{% endfor %}</div></div>
     <div style="min-width:230px"><label>Durum</label><select name="durum">
-      {% for k, ad in [('tum','Tümü'),('gecerli','İptal olmayanlar'),('iptal','Sadece iptaller'),('fark','Logo toplamıyla farkı olanlar'),('disarida','Analize alınmayan satırı olanlar')] %}
+      {% for k, ad in [('tum','Tümü'),('gecerli','İptal olmayanlar'),('iptal','Sadece iptaller'),('fark','Logo toplamıyla farkı olanlar'),('disarida','Analize alınmayan satırı olanlar'),('haric','Hesaplama dışı bırakılanlar')] %}
       <option value="{{ k }}" {{ 'selected' if fl.durum == k }}>{{ ad }}</option>{% endfor %}</select></div>
     {% if fl.cari_kod %}<input type="hidden" name="cari_kod" value="{{ fl.cari_kod }}">{% endif %}
     {% if fl.urun_kod %}<input type="hidden" name="urun_kod" value="{{ fl.urun_kod }}">{% endif %}
@@ -54,7 +54,7 @@
 
 <div class="izgara i4" style="margin-top:16px">
   <div class="kart kpi"><div class="ad">Fatura</div><div class="deger">{{ o.fatura|tl }}</div>
-    <div class="kucuk soluk">{{ o.iptal|tl }} iptal{% if o.fark %} · <span class="fark">{{ o.fark }} Logo'yla farklı</span>{% endif %}</div></div>
+    <div class="kucuk soluk">{{ o.iptal|tl }} iptal{% if o.haric %} · {{ o.haric|tl }} hesaplama dışı{% endif %}{% if o.fark %} · <span class="fark">{{ o.fark }} Logo'yla farklı</span>{% endif %}</div></div>
   <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.satis_net|tl(2) }} ₺</div>
     <div class="kucuk soluk">satış {{ o.satis_brut|tl }} − iade {{ o.satis_iade|tl }}</div></div>
   <div class="kart kpi"><div class="ad">Net alış (KDV hariç)</div><div class="deger">{{ o.alis_net|tl(2) }} ₺</div>
@@ -81,8 +81,8 @@
   <tr class="{{ 'iptal' if r.iptal }}" style="cursor:pointer" onclick="location.href='/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}'">
     <td>{{ r.tarih.strftime('%d.%m.%Y') if r.tarih == r.tarih else '' }}</td>
     <td><a href="/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}">{{ r.fatura_no or '(no yok)' }}</a>{% if r.belge_no %}<div class="kucuk soluk">belge {{ r.belge_no }}</div>{% endif %}</td>
-    <td class="durum">{{ r.tur }}{% if r.iptal %} <span class="rozet rC">iptal</span>{% endif %}</td>
-    <td class="ad">{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td>
+    <td class="durum">{{ r.tur }}{% if r.iptal %} <span class="rozet rC">iptal</span>{% endif %}{% if r.haric and not r.iptal %} <span class="rozet rB" title="{{ r.haric_neden }}">hariç</span>{% endif %}</td>
+    <td class="ad"><a href="/cari/{{ aid }}?kod={{ r.cari_kod|urlencode }}" onclick="event.stopPropagation()">{{ r.cari_ad }}</a><div class="kucuk soluk">{{ r.cari_kod }}</div></td>
     <td>{{ r.ambar_ad }}</td>
     <td class="s">{{ r.satir_say }}{% if r.disarida_satir %}<div class="kucuk soluk" title="Analize alınmayan satır (iptal, indirim, transfer…)">{{ r.disarida_satir }} dışarıda</div>{% endif %}</td>
     {% if o.urun %}<td class="s" style="background:#F1F6FD"><b>{{ r.urun_tutar|tl(2) }}</b><div class="kucuk soluk">{{ r.urun_miktar|tl(2) }} birim</div></td>{% endif %}

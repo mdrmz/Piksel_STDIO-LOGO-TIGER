@@ -88,6 +88,9 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 
 | Analiz | İçerik |
 |---|---|
+| **Ürün kartı / cari kartı** | Aylara göre satış (tıklanabilir), o ayın müşterileri/ürünleri, kime ne kadar, fiyat farkları, otomatik "ne zaman, neden" bulguları |
+| **Ay detayı** | Bir ayın satışını oluşturan cariler ve ürünler; önceki aya / geçen yıla göre farkın kaynağı |
+| **Hesaplama dışı** | Seçilen carileri ve faturaları tüm analizlerden çıkarma (geri alınabilir) |
 | **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
 | **Ürün ABC** | Kârlılığa göre (A = tahmini brüt kârın çoğunu getirenler) ya da net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
@@ -244,6 +247,8 @@ core/logo.py           firma/dönem tarama, Logo tablolarından temiz modele akt
 core/analiz.py         ABC, trend, ölü stok, stok devir, kârlılık, cari yaşlandırma, temsilci, müşteri kaybı, sipariş önerisi, depo
 core/rapor.py          Excel raporu ve Power BI paketi
 core/fatura.py         fatura listesi, filtreler, fatura detayı, Logo ile sağlama
+core/detay.py          ürün kartı, cari kartı, ay detayı, otomatik bulgular
+core/haric.py          cari ve faturaları hesaplama dışı bırakma
 core/pdf_ozet.py       tek sayfalık PDF yönetici özeti
 core/powerbi.py        hazır Power BI raporu (.pbit): model, ölçüler ve rapor sayfaları
 core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap, yönetici yorumu

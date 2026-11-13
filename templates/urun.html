@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% import "_parca.html" as p %}
+{% block baslik %}{{ k.m.malzeme_ad }} — ürün kartı{% endblock %}
+{% block icerik %}
+{{ p.stil() }}
+{% set temel = '/urun/' ~ aid ~ '?kod=' ~ (kod|urlencode) %}
+{% set olcu = request.args.get('olcu', 'miktar') %}{% set olcu = olcu if olcu in ['miktar', 'net_tutar', 'kar', 'ort_fiyat'] else 'miktar' %}
+{% set t = k.toplam %}
+<p class="kucuk"><a href="/panel/{{ aid }}">‹ Panel</a> · <a href="/abc/{{ aid }}/urun">Ürün listesi</a></p>
+<div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start">
+  <div><h1>{{ k.m.malzeme_ad }}</h1><div class="soluk">{{ k.m.malzeme_kod }}{% if k.m.grup_kod %} · {{ k.m.grup_kod }}{% endif %} · ürün kartı</div></div>
+  {% if fatura_var %}<a class="btn ikincil" href="/faturalar/{{ aid }}?urun_kod={{ kod|urlencode }}&tur=satis&tur=satis_iade">Bu ürünün faturaları</a>{% endif %}
+</div>
+
+<div class="izgara i4" style="margin-top:16px">
+  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ t.net_tutar|tl }} ₺</div>
+    <div class="kucuk soluk">{{ t.miktar|tl }} birim · {{ t.fatura|tl }} fatura</div></div>
+  <div class="kart kpi"><div class="ad">Tahmini brüt kâr</div><div class="deger">{% if t.kar is not none %}{{ t.kar|tl }} ₺{% else %}–{% endif %}</div>
+    <div class="kucuk soluk">{% if t.marj is not none %}marj {{ t.marj|yuzde }} · son alış maliyetiyle{% else %}maliyet verisi yok{% endif %}</div></div>
+  <div class="kart kpi"><div class="ad">Ortalama net birim fiyat</div><div class="deger">{% if t.ort_fiyat %}{{ t.ort_fiyat|tl(2) }} ₺{% else %}–{% endif %}</div>
+    <div class="kucuk soluk">{{ t.musteri|tl }} müşteri</div></div>
+  <div class="kart kpi"><div class="ad">Stok</div><div class="deger">{% if t.stok is not none %}{{ t.stok|tl }}{% else %}–{% endif %}</div>
+    <div class="kucuk soluk">son satış {{ t.son_satis.strftime('%d.%m.%Y') if t.son_satis else '–' }}</div></div>
+</div>
+
+<h2>Ne zaman satılmış, neden?</h2>
+<div class="kart">{{ p.bulgular(k.bulgular, temel ~ '&olcu=' ~ olcu) }}
+  <p class="kucuk soluk" style="margin:10px 0 0">Bulgular verideki örüntülerden otomatik çıkarılır; kampanya, ihale, hava gibi dış nedenleri bilemez.
+  Bir aya tıklayıp o ayın müşterilerine bakın.</p></div>
+
+<h2>Aylara göre <span class="olcu-sec kucuk" style="font-weight:400;margin-left:8px">
+  {% for o, ad in [('miktar','Miktar'),('net_tutar','Tutar'),('kar','Kâr'),('ort_fiyat','Birim fiyat')] %}
+  <a class="btn kucuk {{ '' if olcu == o else 'ikincil' }}" href="{{ temel }}&olcu={{ o }}{{ '&ay=' ~ k.ay if k.ay else '' }}">{{ ad }}</a>{% endfor %}</span></h2>
+<div class="kart">{{ p.cubuk(k.aylik, olcu, temel ~ '&olcu=' ~ olcu, k.ay, 'birim' if olcu == 'miktar' else '₺', 2 if olcu == 'ort_fiyat' else 0) }}
+  <p class="kucuk soluk" style="margin:8px 0 0">Bir aya tıklayın: o ay bu ürünü hangi müşteriler almış, aşağıda açılır.</p></div>
+
+{% if k.ay_detay is not none %}
+<h2 id="ay">{{ ay_ad(k.ay) }} — bu ürünü kimler aldı <a class="kucuk" style="font-weight:400" href="{{ temel }}&olcu={{ olcu }}">✕ kapat</a></h2>
+<div class="kart tr-tikla" style="padding:8px 12px;border-color:#BFD3F2"><table>
+  <tr><th>Müşteri</th><th class="s">Miktar</th><th class="s">Tutar</th><th class="s">Ay içi pay</th><th class="s">Birim fiyat</th><th class="s">Kâr</th><th class="s">Fatura</th><th></th></tr>
+  {% for r in k.ay_detay.itertuples() %}
+  <tr data-href="/cari/{{ aid }}?kod={{ r.cari_kod|urlencode }}"><td><a href="/cari/{{ aid }}?kod={{ r.cari_kod|urlencode }}">{{ r.cari_ad or r.cari_kod }}</a><div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }}</div></td>
+    <td class="s">{{ r.miktar|tl(2) }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.ort_fiyat|tl(2) }}</td>
+    <td class="s">{{ r.kar|tl }}</td><td class="s">{{ r.fatura }}</td>
+    <td>{% if fatura_var %}<a class="kucuk" href="/faturalar/{{ aid }}?urun_kod={{ kod|urlencode }}&cari_kod={{ r.cari_kod|urlencode }}&bas={{ k.ay }}-01&bit={{ k.ay }}-31">Faturalar ›</a>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="8" class="soluk">Bu ay satış yok.</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<div class="izgara i2">
+  <div><h2>Hangi firmaya ne kadar <span class="soluk kucuk">({{ k.musteri|length }} müşteri)</span></h2>
+  <div class="kart tr-tikla" style="padding:8px 12px;max-height:560px;overflow:auto"><table>
+    <tr><th>Müşteri</th><th class="s">Miktar</th><th class="s">Tutar</th><th class="s">Pay</th><th class="s">Birim fiyat</th><th class="s">Marj</th><th>Son alım</th></tr>
+    {% for r in k.musteri.head(300).itertuples() %}
+    <tr data-href="/cari/{{ aid }}?kod={{ r.cari_kod|urlencode }}"><td><a href="/cari/{{ aid }}?kod={{ r.cari_kod|urlencode }}">{{ r.cari_ad or r.cari_kod }}</a><div class="kucuk soluk">{{ r.cari_kod }}</div></td>
+      <td class="s">{{ r.miktar|tl }}</td><td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.pay|yuzde }}</td>
+      <td class="s {{ 'eksi' if t.ort_fiyat and r.ort_fiyat == r.ort_fiyat and r.ort_fiyat < t.ort_fiyat * 0.9 }}">{{ r.ort_fiyat|tl(2) }}</td>
+      <td class="s">{{ r.marj|yuzde }}</td><td>{{ r.son.strftime('%d.%m.%Y') }}</td></tr>
+    {% else %}<tr><td colspan="7" class="soluk">Satış yok.</td></tr>{% endfor %}
+  </table></div>
+  <p class="kucuk soluk">Kırmızı fiyat: ürün ortalamasının %10'dan fazla altında.{% if k.musteri|length > 300 %} İlk 300 müşteri gösteriliyor; tamamı Excel raporunda.{% endif %}</p></div>
+  <div><h2>Ay ay tablo</h2>
+  <div class="kart tr-tikla" style="padding:8px 12px;max-height:560px;overflow:auto"><table>
+    <tr><th>Ay</th><th class="s">Miktar</th><th class="s">Tutar</th><th class="s">Müşteri</th><th class="s">Satış fiyatı</th><th class="s">Alış fiyatı</th><th class="s">Kâr</th></tr>
+    {% for r in k.aylik.itertuples() %}
+    <tr data-href="{{ temel }}&olcu={{ olcu }}&ay={{ r.yil_ay }}#ay" class="{{ 'soluk' if r.miktar == 0 }}"><td>{{ r.ay_ad }}</td><td class="s">{{ r.miktar|tl }}</td><td class="s">{{ r.net_tutar|tl }}</td>
+      <td class="s">{{ r.adet|int }}</td><td class="s">{{ r.ort_fiyat|tl(2) }}</td><td class="s">{{ r.alis_fiyat|tl(2) }}</td><td class="s">{{ r.kar|tl }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if k.tedarikci|length %}<h2>Kimden alınıyor</h2>
+  <div class="kart" style="padding:8px 12px"><table>
+    <tr><th>Tedarikçi</th><th class="s">Miktar</th><th class="s">Tutar</th><th class="s">Ort. alış fiyatı</th><th>Son alış</th></tr>
+    {% for r in k.tedarikci.head(10).itertuples() %}
+    <tr><td><a href="/cari/{{ aid }}?kod={{ r.cari_kod|urlencode }}">{{ r.cari_ad or r.cari_kod }}</a></td><td class="s">{{ r.miktar|tl }}</td><td class="s">{{ r.net_tutar|tl }}</td>
+      <td class="s">{{ r.ort_fiyat|tl(2) }}</td><td>{{ r.son.strftime('%d.%m.%Y') }}</td></tr>{% endfor %}
+  </table></div>{% endif %}</div>
+</div>
+{% endblock %}
