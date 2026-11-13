@@ -9,6 +9,7 @@ Kaynaklar:
   BakKaynak     : .bak dosyasını yerel SQL Server'a geçici veritabanı olarak geri yükler, okur, işi bitince siler.
   MssqlKaynak   : Zaten çalışan bir SQL Server veritabanına (Logo'nun canlı veritabanı) salt-okur bağlanır.
   SqliteKaynak  : Demo / test veritabanı.
+  BirlesikKaynak: Birbirini tamamlayan birden fazla yedeği (ör. LOGODB + firma verileri) tek kaynak gibi gösterir.
 """
 from __future__ import annotations
 
@@ -138,6 +139,98 @@ class MssqlKaynak:
             self.con.close()
         except Exception:
             pass
+
+
+_LG_RE = re.compile(r"^LG_\d{3}_", re.I)
+SISTEM_TABLOLARI = ("L_CAPIFIRM", "L_CAPIPERIOD", "L_CAPIWHOUSE")
+
+
+def rol(kaynak) -> str:
+    """Yedeğin ne içerdiği: 'veri' (LG_XXX_ firma tabloları), 'sistem' (sadece L_CAPIFIRM vb. — LOGODB) ya da 'bos'."""
+    ts = {t.upper() for t in kaynak.tablolar()}
+    if any(_LG_RE.match(t) for t in ts):
+        return "veri"
+    if ts & set(SISTEM_TABLOLARI):
+        return "sistem"
+    return "bos"
+
+
+class BirlesikKaynak:
+    """
+    Birbirini tamamlayan birden fazla veritabanını tek kaynak gibi gösterir.
+
+    Logo Tiger'da firma tanımları (L_CAPIFIRM: firma adları, L_CAPIPERIOD: dönem tarihleri, L_CAPIWHOUSE: ambarlar)
+    çoğu kurulumda ayrı bir sistem veritabanında (LOGODB) durur; firma verileri (LG_XXX_…) başka bir veritabanındadır.
+    Firmadan iki ayrı .bak gelir. Her tablo, onu içeren ilk kaynaktan okunur.
+    """
+
+    def __init__(self, kaynaklar: list):
+        if not kaynaklar:
+            raise KaynakHatasi("Kaynak yok.")
+        self.kaynaklar = list(kaynaklar)
+        self.tur = self.kaynaklar[0].tur
+        self.ad = " + ".join(k.ad for k in self.kaynaklar)
+        self._yer: dict[str, object] = {}
+        self._adlar: dict[str, str] = {}
+        self.cakisan: list[str] = []
+        for k in self.kaynaklar:
+            for t in k.tablolar():
+                u = t.upper()
+                if u in self._yer:
+                    self.cakisan.append(u)
+                    continue
+                self._yer[u] = k
+                self._adlar[u] = t
+
+    def _kaynak(self, tablo):
+        try:
+            return self._yer[tablo.upper()]
+        except KeyError:
+            raise KaynakHatasi(f"Tablo hiçbir yedekte yok: {tablo}") from None
+
+    def tablolar(self):
+        return sorted(self._adlar.values())
+
+    def kolonlar(self, tablo):
+        return self._kaynak(tablo).kolonlar(self._adlar[tablo.upper()])
+
+    def tablo_oku(self, tablo, kolonlar):
+        return self._kaynak(tablo).tablo_oku(self._adlar[tablo.upper()], kolonlar)
+
+    def kapat(self):
+        for k in self.kaynaklar:
+            try:
+                k.kapat()
+            except Exception:
+                pass
+
+
+def birlestir(kaynaklar: list, ilerleme=None):
+    """Açılmış kaynakları rollerine göre sıralayıp birleştirir. Tek kaynak verilirse onu olduğu gibi döner.
+    Firma verisi içeren hiçbir yedek yoksa anlaşılır bir hata verir."""
+    say = ilerleme or (lambda m: None)
+    roller = [(k, rol(k)) for k in kaynaklar]
+    for k, r in roller:
+        say(f"{k.ad}: " + {"veri": "firma verileri (LG_ tabloları) bulundu.",
+                           "sistem": "Logo sistem veritabanı (firma adları, dönem tarihleri, ambarlar) bulundu.",
+                           "bos": "Logo tablosu bulunamadı."}[r])
+    if not any(r == "veri" for _, r in roller):
+        if any(r == "sistem" for _, r in roller):
+            raise KaynakHatasi("Seçilen yedek(ler) yalnızca Logo'nun sistem veritabanı (LOGODB: firma adları ve "
+                               "dönemler). Firma verilerinin olduğu yedeği de ekleyin (genelde daha büyük olan, "
+                               "adı TIGER, TIGERDB, GO3 vb.).")
+        raise KaynakHatasi("Seçilen yedek(ler)de Logo firma tabloları (LG_XXX_CLCARD, LG_XXX_PP_STLINE…) bulunamadı.")
+    if len(kaynaklar) == 1:
+        return kaynaklar[0]
+    # firma verileri önce: aynı tablo iki yedekte de varsa veri yedeğindeki kullanılır
+    sirali = [k for k, r in roller if r == "veri"] + [k for k, r in roller if r != "veri"]
+    b = BirlesikKaynak(sirali)
+    lg_cakisan = sorted({t for t in b.cakisan if _LG_RE.match(t)})
+    if lg_cakisan:
+        firmalar = sorted({t[3:6] for t in lg_cakisan})
+        say(f"Uyarı: {', '.join(firmalar)} numaralı firmanın tabloları birden fazla yedekte var; "
+            f"ilk yedekteki ({sirali[0].ad}) kullanılıyor.")
+    return b
 
 
 class BakKaynak(MssqlKaynak):

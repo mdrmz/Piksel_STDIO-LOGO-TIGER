@@ -43,9 +43,13 @@ Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özel
    Siyah pencere programın kendisidir; iş bitene kadar kapatmayın.
    - Windows "Windows kişisel bilgisayarınızı korudu" derse: **Ek bilgi → Yine de çalıştır**.
    - macOS "açılamıyor" derse, Terminal'de bir kez: `xattr -dr com.apple.quarantine ~/Downloads/LogoTigerAnaliz`
-3. **Yedeği seçin ve Başlat'a basın.** İlk seferde program kendi SQL Server'ını kurar
+3. **Yedeği seçin ve Başlat'a basın.** Firmadan **iki** `.bak` geldiyse (biri genelde küçük `LOGODB`: firma adları
+   ve dönemler; diğeri firma verileri) ikincisini **İkinci yedek var mı?** alanına koyun; program ikisini birleştirir,
+   hangisinin hangisi olduğunu kendisi anlar. İlk seferde program kendi SQL Server'ını kurar
    (internet gerekir, ~5 dakika; Windows "yönetici izni" sorduğunda **Evet** deyin). Sonraki açılışlarda bu adım atlanır.
-4. **Firma ve dönem seçin.** Program yedekteki tüm Logo firmalarını ve dönemlerini kendisi bulur.
+4. **Firma ve dönem seçin.** Program yedekteki tüm Logo firmalarını ve dönemlerini kendisi bulur. Çok firmalı
+   yedeklerde arama kutusuyla firmayı bulun; her analiz tek bir firma içindir, firmalar birbirine karışmaz.
+   Başka bir firmayı da analiz edecekseniz *Sonra başka firmayı da analiz edeceğim* kutusunu işaretleyin (yedek yeniden açılmaz).
 5. **Raporu alın.** Panelde özet görünür; **Excel raporu** ya da **PDF özet** düğmesiyle indirin, **Power BI raporu aç** ile hazır raporu Power BI'da açın.
 
 > Program yedeği geçici bir veritabanına (`LOGOANALIZ_XXXXXXXX`) geri yükler, verileri okur ve bu geçici veritabanını
@@ -192,7 +196,9 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 | *Yerel SQL Server'a bağlanılamadı* (elle seçilen sunucu) | Servis çalışıyor mu, sunucu adı doğru mu? Adlandırılmış örneklerde (`PC\SQLEXPRESS`) *SQL Server Browser* servisi açık ve TCP/IP etkin olmalı. Kullanıcı/şifre (genelde `sa`) doğru mu? |
 | *Yedek okunamadı… Operating system error 5* | SQL Server servisinin dosyayı okuma izni yok. `.bak`'ı SQL Server'ın `Backup` klasörüne (ör. `C:\Program Files\Microsoft SQL Server\MSSQL15.SQLEXPRESS\MSSQL\Backup`) koyup tam yolunu yazın. |
 | *…is incompatible with this server* | Yedek daha yeni bir SQL Server sürümüyle alınmış; bilgisayardaki SQL Server'ı güncelleyin. |
-| *Logo firma tabloları bulunamadı* | Yedek Logo Tiger/Go veritabanı değil, ya da sadece sistem veritabanı (`LOGODB`) yedeği alınmış. |
+| *Logo firma tabloları bulunamadı* | Yedek Logo Tiger/Go veritabanı değil. |
+| *…yalnızca Logo'nun sistem veritabanı (LOGODB)* | Sadece `LOGODB` yedeği seçilmiş. Firma verilerinin olduğu yedeği de **İkinci yedek** alanına ekleyin. |
+| Firma listesinde adlar boş | Firma adları ayrı `LOGODB` yedeğinde duruyor; o yedeği de ikinci yedek olarak ekleyin. |
 | Port 5055 dolu | `LOGO_ANALIZ_PORT=5056` ortam değişkeniyle başka port kullanın. |
 
 Herhangi bir sorunda sayfanın altındaki **Tanılama paketi** bağlantısıyla bir zip indirip [Issues](../../issues)'a ekleyin.

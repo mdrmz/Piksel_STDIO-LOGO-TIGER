@@ -40,7 +40,7 @@ def baglan(sql, db="master", autocommit=True):
                            database=db, autocommit=autocommit, charset="UTF-8", login_timeout=30)
 
 
-def logo_veritabani_olustur(sql, ad="LOGOTEST"):
+def logo_veritabani_olustur(sql, ad="LOGOTEST", filtre=lambda tablo: True):
     con = baglan(sql)
     cur = con.cursor()
     cur.execute(f"IF DB_ID('{ad}') IS NOT NULL DROP DATABASE [{ad}]")
@@ -50,6 +50,8 @@ def logo_veritabani_olustur(sql, ad="LOGOTEST"):
     cur = con.cursor()
     src = sqlite3.connect(DEMO)
     for (tablo,) in src.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        if not filtre(tablo):
+            continue
         kolonlar = [(r[1], r[2]) for r in src.execute(f"PRAGMA table_info({tablo})")]
         tanim = ", ".join(f"[{k}] {'datetime' if k == 'DATE_' else TIP.get(t.upper(), 'varchar(250)')}"
                           f"{' NOT NULL PRIMARY KEY' if k == 'LOGICALREF' else ''}" for k, t in kolonlar)
@@ -63,6 +65,41 @@ def logo_veritabani_olustur(sql, ad="LOGOTEST"):
         con.commit()
         print(f"  {tablo}: {len(satirlar)} satır", flush=True)
     con.close()
+
+
+def yedek_al_tasi(sql, db, dosya_adi):
+    """Veritabanının .bak yedeğini alır, veritabanını siler, dosyayı kullanıcının masaüstü gibi bir klasöre taşır."""
+    ad = f"{db}_kaynak.bak"
+    yerel_bak = os.path.join(sql["yedek_klasoru"], ad)
+    sk = sql.get("sunucu_yedek_klasoru") or sql["yedek_klasoru"]
+    sunucu_tarafi = sk.rstrip("/\\") + ("/" if sk.startswith("/") else "\\") + ad
+    con = baglan(sql)
+    cur = con.cursor()
+    cur.execute(f"BACKUP DATABASE [{db}] TO DISK = %s WITH INIT, FORMAT", (sunucu_tarafi,))
+    while cur.nextset():
+        pass
+    cur.execute(f"DROP DATABASE [{db}]")
+    con.close()
+    if sql["tur"] == "docker":  # konteynerin yazdığı dosyayı kullanıcının okuyabileceği hale getir
+        import subprocess
+        subprocess.run(["docker", "exec", "-u", "0", kurulum.KONTEYNER, "chmod", "644",
+                        f"/var/opt/mssql/backup/{ad}"], check=True)
+    hedef = os.path.join(tempfile.gettempdir(), "Masaustu", dosya_adi)
+    os.makedirs(os.path.dirname(hedef), exist_ok=True)
+    shutil.move(yerel_bak, hedef)
+    print(f"  yedek: {hedef} ({os.path.getsize(hedef) / 1024 ** 2:.1f} MB)")
+    return hedef
+
+
+def temizlik_kontrol(sql):
+    con = baglan(sql)
+    cur = con.cursor()
+    cur.execute("SELECT name FROM sys.databases WHERE name LIKE 'LOGOANALIZ[_]%'")
+    kalan = [r[0] for r in cur.fetchall()]
+    con.close()
+    assert not kalan, f"geçici veritabanı silinmemiş: {kalan}"
+    artik = [x for x in os.listdir(sql["yedek_klasoru"]) if x.startswith("LOGOANALIZ_")]
+    assert not artik, f"kopya .bak silinmemiş: {artik}"
 
 
 def main():
@@ -79,25 +116,7 @@ def main():
 
     adim("3) Logo yapısında test veritabanı ve .bak yedeği")
     logo_veritabani_olustur(sql)
-    yerel_bak = os.path.join(sql["yedek_klasoru"], "LOGOTEST_kaynak.bak")
-    sk = sql.get("sunucu_yedek_klasoru") or sql["yedek_klasoru"]
-    sunucu_tarafi = sk.rstrip("/\\") + ("/" if sk.startswith("/") else "\\") + "LOGOTEST_kaynak.bak"
-    con = baglan(sql)
-    cur = con.cursor()
-    cur.execute("BACKUP DATABASE [LOGOTEST] TO DISK = %s WITH INIT, FORMAT", (sunucu_tarafi,))
-    while cur.nextset():
-        pass
-    cur.execute("DROP DATABASE [LOGOTEST]")
-    con.close()
-    if sql["tur"] == "docker":  # konteynerin yazdığı dosyayı kullanıcının okuyabileceği hale getir
-        import subprocess
-        subprocess.run(["docker", "exec", "-u", "0", kurulum.KONTEYNER, "chmod", "644",
-                        "/var/opt/mssql/backup/LOGOTEST_kaynak.bak"], check=True)
-    sunucu_bak = yerel_bak
-    kullanici_bak = os.path.join(tempfile.gettempdir(), "Masaustu", "TIGER_TEST.bak")
-    os.makedirs(os.path.dirname(kullanici_bak), exist_ok=True)
-    shutil.move(sunucu_bak, kullanici_bak)
-    print(f"  yedek: {kullanici_bak} ({os.path.getsize(kullanici_bak) / 1024 ** 2:.1f} MB)")
+    kullanici_bak = yedek_al_tasi(sql, "LOGOTEST", "TIGER_TEST.bak")
 
     adim("4) Uygulama akışı: .bak → programın SQL Server'ı → firma 001 aktarımı")
     import app as A
@@ -154,14 +173,27 @@ def main():
     print("  ilk müşteri:", m1.iloc[0]["cari_ad"])
 
     adim("6) Geçici veritabanı ve kopya dosya temizlendi mi")
-    con = baglan(sql)
-    cur = con.cursor()
-    cur.execute("SELECT name FROM sys.databases WHERE name LIKE 'LOGOANALIZ[_]%'")
-    kalan = [r[0] for r in cur.fetchall()]
-    con.close()
-    assert not kalan, f"geçici veritabanı silinmemiş: {kalan}"
-    artik = [x for x in os.listdir(sql["yedek_klasoru"]) if x.startswith("LOGOANALIZ_")]
-    assert not artik, f"kopya .bak silinmemiş: {artik}"
+    temizlik_kontrol(sql)
+
+    adim("7) İki ayrı yedek: LOGODB (firma tanımları) + firma verileri")
+    sistem_mi = lambda t: t.upper().startswith("L_CAPI")  # noqa: E731
+    logo_veritabani_olustur(sql, "LOGOSIS", sistem_mi)
+    logo_veritabani_olustur(sql, "LOGOVERI", lambda t: not sistem_mi(t))
+    sistem_bak = yedek_al_tasi(sql, "LOGOSIS", "LOGODB_TEST.bak")
+    veri_bak = yedek_al_tasi(sql, "LOGOVERI", "TIGERDB_TEST.bak")
+    # sistem yedeği birinci alana konsa bile program doğru birleştirmeli
+    c.post("/kaynak", data={"tur": "bak", "bak_yol": sistem_bak, "bak_yol2": veri_bak, "sql_kaynak": "otomatik"})
+    d = bekle()
+    assert d["hata"] is None, d["hata"]
+    h = c.get("/firmalar").get_data(as_text=True)
+    assert "DEMO YAPI MARKET" in h and "DEMO ŞUBE" in h, "firma adları LOGODB yedeğinden gelmeli"
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01", "02"], "sadece_faturali": "1"})
+    d = bekle()
+    assert d["hata"] is None, d["hata"]
+    a2 = Analiz(os.path.join(A.CALISMA, d["sonraki"].rsplit("/", 1)[-1], "analiz.sqlite"))
+    assert abs(a2.ozet()["net_satis"] - o2["net_satis"]) < 0.05
+    assert a2.depo_kirilim()["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+    temizlik_kontrol(sql)
 
     print(f"\nTÜM ADIMLAR BAŞARILI ({time.time() - t0:.0f} sn)")
 

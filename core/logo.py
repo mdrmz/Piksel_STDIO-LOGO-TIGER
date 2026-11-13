@@ -64,11 +64,34 @@ class Firma:
     donemler: list = field(default_factory=list)
     kart_tablolari: set = field(default_factory=set)
     donem_tablolari: dict = field(default_factory=dict)  # donem -> set(tablo)
+    donem_tarih: dict = field(default_factory=dict)      # donem -> "01.01.2025 – 31.12.2025" (L_CAPIPERIOD varsa)
 
     @property
     def analiz_edilebilir(self):
         return {"CLCARD", "ITEMS"} <= self.kart_tablolari and any(
             "STLINE" in t for t in self.donem_tablolari.values())
+
+
+def _tarih(v):
+    t = pd.to_datetime(v, errors="coerce")
+    return "" if pd.isna(t) else f"{t:%d.%m.%Y}"
+
+
+def firma_tanimlari(kaynak) -> dict[str, str]:
+    """L_CAPIFIRM'deki (Logo sistem veritabanı) tüm firma tanımları: firma no -> ad. Tablo yoksa boş."""
+    if "L_CAPIFIRM" not in {t.upper() for t in kaynak.tablolar()}:
+        return {}
+    try:
+        df = _oku(kaynak, "L_CAPIFIRM", {"NR": 0, "NAME": ""})
+    except Exception:
+        return {}
+    out = {}
+    for _, r in df.iterrows():
+        try:
+            out[f"{int(r['NR']):03d}"] = turkce_onar(str(r["NAME"] or "").strip())
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def firmalari_tara(kaynak) -> list[Firma]:
@@ -83,14 +106,19 @@ def firmalari_tara(kaynak) -> list[Firma]:
         m = _FIRMA_RE.match(t)
         if m:
             firmalar.setdefault(m[1], Firma(m[1])).kart_tablolari.add(m[2])
-    # Firma adları (L_CAPIFIRM aynı veritabanındaysa)
-    if "L_CAPIFIRM" in tablolar:
+    # Firma adları ve dönem tarihleri (L_CAPIFIRM / L_CAPIPERIOD: aynı veritabanında ya da ayrı LOGODB yedeğinde)
+    for no, ad in firma_tanimlari(kaynak).items():
+        if no in firmalar:
+            firmalar[no].ad = ad
+    if "L_CAPIPERIOD" in tablolar:
         try:
-            df = kaynak.tablo_oku("L_CAPIFIRM", ["NR", "NAME"])
+            df = _oku(kaynak, "L_CAPIPERIOD", {"FIRMNR": 0, "NR": 0, "BEGDATE": None, "ENDDATE": None})
             for _, r in df.iterrows():
-                no = f"{int(r['NR']):03d}"
+                no, p = f"{int(r['FIRMNR']):03d}", f"{int(r['NR']):02d}"
                 if no in firmalar:
-                    firmalar[no].ad = turkce_onar(str(r["NAME"] or "").strip())
+                    bas, bit = _tarih(r["BEGDATE"]), _tarih(r["ENDDATE"])
+                    if bas or bit:
+                        firmalar[no].donem_tarih[p] = f"{bas} – {bit}"
         except Exception:
             pass
     for f in firmalar.values():

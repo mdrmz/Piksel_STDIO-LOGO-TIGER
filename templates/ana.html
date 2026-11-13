@@ -44,10 +44,20 @@
     <input type="hidden" name="tur" value="bak">
     <div class="izgara i2">
       <div>
-        <label>Yedek dosyası</label>
+        <label>1. Yedek dosyası (firma verileri)</label>
         <input type="file" name="bak_dosya" accept=".bak">
         <label>…ya da dosyanın tam yolu (büyük yedeklerde daha hızlı)</label>
         <input type="text" name="bak_yol" placeholder="C:\Yedekler\TIGER.bak">
+        <details style="margin-top:12px">
+          <summary><b>İkinci yedek var mı?</b> <span class="soluk">(LOGODB — firma adları ve dönemler)</span></summary>
+          <p class="kucuk soluk" style="margin:6px 0 0">Logo bazı firmalarda firma tanımlarını ayrı bir veritabanında
+            (genelde <code>LOGODB</code>, küçük bir dosya) tutar. Elinize iki <code>.bak</code> geldiyse ikincisini buraya
+            koyun; program ikisini birleştirir, firmaları adlarıyla listeler. Hangisini nereye koyduğunuz önemli değil.</p>
+          <label>2. Yedek dosyası (isteğe bağlı)</label>
+          <input type="file" name="bak_dosya2" accept=".bak">
+          <label>…ya da tam yolu</label>
+          <input type="text" name="bak_yol2" placeholder="C:\Yedekler\LOGODB.bak">
+        </details>
       </div>
       <div>
         <label>Yedek hangi SQL Server ile açılsın?</label>

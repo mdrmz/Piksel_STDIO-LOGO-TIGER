@@ -1,23 +1,35 @@
 {% extends "base.html" %}
 {% block icerik %}
 <h1>Firma ve dönem seçimi</h1>
-<p class="soluk">Kaynak: {{ kaynak_ad }} · {{ firmalar|length }} Logo firması bulundu.</p>
+<p class="soluk">Kaynak: {{ kaynak_ad }} · {{ firmalar|length }} Logo firması bulundu.
+  Her analiz tek bir firma içindir; firmalar birbirine karışmaz.</p>
 
-<form method="post" action="/aktar">
+<form method="post" action="/aktar" id="f-aktar">
 <div class="kart">
-  <table>
+  {% if firmalar|length > 5 %}
+  <input type="search" id="ara" placeholder="Firma ara (ad ya da numara)…" style="margin-bottom:10px" autocomplete="off">
+  {% endif %}
+  <table id="firmalar">
     <tr><th style="width:40px"></th><th>Firma</th><th>Dönemler</th></tr>
     {% for f in firmalar %}
-    <tr>
-      <td><input type="radio" name="firma" value="{{ f.no }}" {% if loop.first %}checked{% endif %}></td>
-      <td><b>{{ f.no }}</b> {{ f.ad or '' }}</td>
+    <tr class="firma" data-ara="{{ f.no }} {{ f.ad or '' }}">
+      <td><input type="radio" name="firma" value="{{ f.no }}" id="r{{ f.no }}" required {% if firmalar|length == 1 %}checked{% endif %}></td>
+      <td><label for="r{{ f.no }}" style="margin:0;color:var(--yazi);font-size:14px;cursor:pointer"><b>{{ f.no }}</b> {{ f.ad or '' }}</label></td>
       <td>{% for p in f.donemler %}
         <label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 0 0;color:var(--yazi);font-size:14px">
-          <input type="checkbox" name="donem_{{ f.no }}" value="{{ p }}" checked> {{ p }}</label>
+          <input type="checkbox" name="donem_{{ f.no }}" value="{{ p }}" checked> {{ p }}
+          {% if f.donem_tarih.get(p) %}<span class="kucuk soluk">({{ f.donem_tarih[p] }})</span>{% endif %}</label>
       {% endfor %}</td>
     </tr>
     {% endfor %}
   </table>
+  <p id="secim" class="kucuk" style="margin:10px 0 0">{% if firmalar|length > 1 %}Analiz edilecek firmayı seçin.{% endif %}</p>
+  {% if verisiz %}
+  <details style="margin-top:10px"><summary class="kucuk soluk">Tanımlı ama bu yedekte verisi olmayan {{ verisiz|length }} firma</summary>
+    <p class="kucuk soluk" style="margin:6px 0 0">{% for no, ad in verisiz %}{{ no }} {{ ad }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    <p class="kucuk soluk" style="margin:4px 0 0">Bu firmaların verileri başka bir yedekte olabilir; o yedekle ayrıca analiz edin.</p>
+  </details>
+  {% endif %}
 </div>
 
 <h2>Ayarlar</h2>
@@ -42,4 +54,35 @@
 </div>
 <p style="margin-top:18px"><button class="btn">Verileri aktar ve analiz et</button></p>
 </form>
+
+<script>
+const satirlar = [...document.querySelectorAll('tr.firma')];
+function guncelle() {
+  const sec = document.querySelector('input[name=firma]:checked');
+  satirlar.forEach(tr => {
+    const secili = sec && tr.contains(sec);
+    tr.style.background = secili ? '#EEF3FB' : '';
+    tr.style.opacity = (sec && !secili) ? '.55' : '';
+  });
+  const p = document.getElementById('secim');
+  if (sec) {
+    const ad = sec.closest('tr').querySelector('label').textContent.trim();
+    const n = sec.closest('tr').querySelectorAll('input[type=checkbox]:checked').length;
+    p.innerHTML = `Seçilen firma: <b>${ad}</b> · ${n} dönem. Sadece bu firmanın verileri analiz edilir.`;
+  }
+}
+document.querySelectorAll('#firmalar input').forEach(i => i.addEventListener('change', guncelle));
+const ara = document.getElementById('ara');
+if (ara) ara.addEventListener('input', () => {
+  const q = ara.value.toLocaleLowerCase('tr').trim();
+  satirlar.forEach(tr => tr.style.display = (!q || tr.dataset.ara.toLocaleLowerCase('tr').includes(q)) ? '' : 'none');
+});
+document.getElementById('f-aktar').addEventListener('submit', e => {
+  const sec = document.querySelector('input[name=firma]:checked');
+  if (sec && !sec.closest('tr').querySelector('input[type=checkbox]:checked')) {
+    e.preventDefault(); alert('Seçilen firma için en az bir dönem işaretleyin.');
+  }
+});
+guncelle();
+</script>
 {% endblock %}

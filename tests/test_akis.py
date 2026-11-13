@@ -464,3 +464,151 @@ def test_tanilama_paketi_musteri_verisi_icermez(tmp_path, monkeypatch):
     for yasak in ("DEMO YAPI", "DEMO ŞUBE", "MÜŞTERİ", "TEDARİKÇİ", "YILMAZ", "MERKEZ DEPO"):
         assert yasak not in hepsi, yasak
     assert '"fact_satis":' in hepsi and "Aktarım tamamlandı" in hepsi
+
+
+# ---------------------------------------------------------------------------- iki yedek: LOGODB + firma verileri
+def _bol(tmp_path, ek_firma=True):
+    """Demo veritabanını Logo'daki gibi ikiye böler: sistem (L_CAPI… = LOGODB) ve firma verileri (LG_…)."""
+    src = sqlite3.connect(DEMO)
+    sistem, veri = str(tmp_path / "LOGODB.sqlite"), str(tmp_path / "TIGERDB.sqlite")
+    for hedef, kosul in ((sistem, "name LIKE 'L\\_CAPI%' ESCAPE '\\'"), (veri, "name NOT LIKE 'L\\_CAPI%' ESCAPE '\\'")):
+        con = sqlite3.connect(hedef)
+        for ad, ddl in src.execute(f"SELECT name, sql FROM sqlite_master WHERE type='table' AND {kosul}").fetchall():
+            con.execute(ddl)
+            rows = src.execute(f"SELECT * FROM {ad}").fetchall()
+            if rows:
+                con.executemany(f"INSERT INTO {ad} VALUES ({','.join('?' * len(rows[0]))})", rows)
+        if ek_firma and hedef == sistem:  # LOGODB'de tanımlı ama veri yedeğinde olmayan firma
+            con.execute("INSERT INTO L_CAPIFIRM VALUES (3, 'BAŞKA FİRMA', 'BAŞKA FİRMA A.Ş.')")
+        con.commit()
+        con.close()
+    return sistem, veri
+
+
+def test_rol_tespiti(tmp_path):
+    from core.kaynak import rol
+    sistem, veri = _bol(tmp_path)
+    assert rol(SqliteKaynak(sistem)) == "sistem"
+    assert rol(SqliteKaynak(veri)) == "veri"
+    assert rol(SqliteKaynak(DEMO)) == "veri"
+
+
+def test_sadece_logodb_anlasilir_hata(tmp_path):
+    from core.kaynak import KaynakHatasi, birlestir
+    sistem, _ = _bol(tmp_path)
+    with pytest.raises(KaynakHatasi, match="LOGODB"):
+        birlestir([SqliteKaynak(sistem)])
+
+
+@pytest.mark.parametrize("sira", ["sistem_once", "veri_once"])
+def test_iki_yedek_birlesir(tmp_path, sira):
+    from core.kaynak import BirlesikKaynak, birlestir
+    from core.logo import firma_tanimlari
+    sistem, veri = _bol(tmp_path)
+    ks = [SqliteKaynak(sistem), SqliteKaynak(veri)]
+    if sira == "veri_once":
+        ks.reverse()
+    log = []
+    k = birlestir(ks, log.append)
+    assert isinstance(k, BirlesikKaynak) and k.kaynaklar[0].ad == "TIGERDB.sqlite"  # veri yedeği her zaman önce
+    assert any("sistem veritabanı" in m for m in log)
+    fs = {f.no: f for f in firmalari_tara(k)}
+    assert set(fs) == {"001", "002"}                       # 003 tanımlı ama verisi yok -> listede değil
+    assert fs["001"].ad == "DEMO YAPI MARKET" and fs["002"].ad == "DEMO ŞUBE"
+    assert fs["001"].donem_tarih["01"] == "01.01.2025 – 31.12.2025"
+    assert firma_tanimlari(k)["003"] == "BAŞKA FİRMA"
+    # analiz sonucu tek veritabanıyla aynı; ambar adları LOGODB'den gelir
+    yol = str(tmp_path / "a.sqlite")
+    aktar(k, fs["001"], fs["001"].donemler, yol)
+    k.kapat()
+    ref = str(tmp_path / "ref.sqlite")
+    r = SqliteKaynak(DEMO)
+    aktar(r, next(f for f in firmalari_tara(r) if f.no == "001"), ["01", "02"], ref)
+    a, b = Analiz(yol), Analiz(ref)
+    for anahtar in ("net_satis", "net_alis", "brut_kar", "musteri_sayisi"):
+        assert a.ozet()[anahtar] == pytest.approx(b.ozet()[anahtar], abs=0.01), anahtar
+    assert a.depo_kirilim()["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+
+
+def test_logodb_olmadan_firma_adi_bos_ama_calisir(tmp_path):
+    _, veri = _bol(tmp_path)
+    fs = {f.no: f for f in firmalari_tara(SqliteKaynak(veri))}
+    assert set(fs) == {"001", "002"} and fs["001"].ad == "" and fs["001"].donem_tarih == {}
+
+
+def test_firma_secim_ekrani_iki_yedek(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    import importlib
+    import app as A
+    from core.kaynak import birlestir
+    importlib.reload(A)
+    sistem, veri = _bol(tmp_path)
+    A._tara(birlestir([SqliteKaynak(sistem), SqliteKaynak(veri)]), "LOGODB.bak + TIGERDB.bak")
+    h = A.app.test_client().get("/firmalar").get_data(as_text=True)
+    assert "DEMO YAPI MARKET" in h and "DEMO ŞUBE" in h and "01.01.2025 – 31.12.2025" in h
+    assert "verisi olmayan 1 firma" in h and "BAŞKA FİRMA" in h
+    assert 'name="firma" value="001" id="r001" required >' in h   # birden çok firmada hiçbiri önceden seçili değil
+    A._kaynagi_kapat()
+
+
+def test_ana_sayfa_ikinci_yedek_alani():
+    import app as A
+    h = A.app.test_client().get("/").get_data(as_text=True)
+    assert 'name="bak_dosya2"' in h and 'name="bak_yol2"' in h
+
+
+def test_iki_yedek_arayuz_akisi(tmp_path, monkeypatch):
+    """/kaynak iki yolu alır, ikisini de açar, birleştirir; hata olursa açılanları kapatır (geçici veritabanı silinir)."""
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    import importlib
+    import app as A
+    importlib.reload(A)
+    sistem, veri = _bol(tmp_path)
+    acilan, kapanan = [], []
+
+    class SahteBak(SqliteKaynak):
+        tur = "bak"
+
+        def __init__(self, yol, **kw):
+            if "BOZUK" in yol:
+                raise A.KaynakHatasi("Yedek okunamadı")
+            super().__init__(yol)
+            acilan.append(self.ad)
+
+        def kapat(self):
+            kapanan.append(self.ad)
+            super().kapat()
+
+    monkeypatch.setattr(A, "BakKaynak", SahteBak)
+    monkeypatch.setattr(A.kurulum, "hazirla", lambda say: {"sunucu": "x", "port": 1, "kullanici": "", "sifre": ""})
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(300):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.05)
+
+    c.post("/kaynak", data={"tur": "bak", "bak_yol": sistem, "bak_yol2": f'"{veri}"', "sql_kaynak": "otomatik"})
+    d = bekle()
+    assert d["hata"] is None and d["sonraki"] == "/firmalar", d
+    assert acilan == ["LOGODB.sqlite", "TIGERDB.sqlite"]
+    assert "DEMO YAPI MARKET" in c.get("/firmalar").get_data(as_text=True)
+    c.post("/aktar", data={"firma": "002", "donem_002": ["01"], "sadece_faturali": "1"})
+    d = bekle()
+    assert d["hata"] is None, d
+    assert sorted(kapanan) == ["LOGODB.sqlite", "TIGERDB.sqlite"]       # iş bitince ikisi de kapatıldı
+
+    # ikinci yedek açılamazsa birincinin geçici veritabanı da silinmeli
+    bozuk = tmp_path / "BOZUK.bak"
+    bozuk.write_bytes(b"x")
+    acilan.clear(); kapanan.clear()
+    c.post("/kaynak", data={"tur": "bak", "bak_yol": veri, "bak_yol2": str(bozuk), "sql_kaynak": "otomatik"})
+    d = bekle()
+    assert "okunamadı" in d["hata"] and acilan == ["TIGERDB.sqlite"] and kapanan == ["TIGERDB.sqlite"]
+
+    # olmayan dosya ve üçten fazla yedek reddedilir
+    assert "bulunamadı" in c.post("/kaynak", data={"tur": "bak", "bak_yol2": str(tmp_path / "yok.bak")}).get_data(as_text=True)
+    r = c.post("/kaynak", data={"tur": "bak", "bak_yol": f"{sistem}\n{veri}", "bak_yol2": str(bozuk)})
+    assert "En fazla iki" in r.get_data(as_text=True)
