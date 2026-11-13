@@ -1243,3 +1243,50 @@ def test_yz_fatura_aciklamasini_okuyamaz(depo, tmp_path):
     for sql in ("SELECT aciklama FROM dim_fatura LIMIT 3", "SELECT aciklama AS x, fatura_no FROM dim_fatura LIMIT 3"):
         assert "AHMET" not in yz.sql_calistir(yol, sql, yz.Maske(a, "DEMO", True))
     assert "AHMET" in yz.sql_calistir(yol, "SELECT aciklama FROM dim_fatura LIMIT 3", yz.Maske(a, "DEMO", False))
+
+
+def test_kar_abc(depo):
+    """Kârlılığa göre ABC: A = brüt kârın ilk %80'i; kâr toplamı kârlılık tablosuyla aynı; zararlar sonda C."""
+    a = Analiz(depo)
+    for seviye, kod in (("malzeme", "malzeme_kod"), ("cari", "cari_kod")):
+        t, k = a.kar_abc(seviye), a.karlilik(seviye)
+        assert len(t) == len(k) and t["brut_kar"].sum() == pytest.approx(k["brut_kar"].sum())
+        assert list(t["sira"]) == list(range(1, len(t) + 1)) and t[kod].is_unique
+        kz = t[~t["zarar"]]
+        assert kz["brut_kar"].is_monotonic_decreasing and (kz["brut_kar"] > 0).all()
+        a_kar = kz[kz["sinif"] == "A"]["brut_kar"].sum() / kz["brut_kar"].sum()
+        assert 0.80 <= a_kar < 0.80 + kz["pay"].max() + 1e-9
+        assert (t[t["zarar"]]["sinif"] == "C").all() and (t[t["zarar"]]["brut_kar"] <= 0).all()
+        assert set(t["ciro_sinif"]) <= {"A", "B", "C", "-"}
+
+
+def test_abc_ekrani_kara_gore_varsayilan(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import app as A
+    import openpyxl
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(600):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    p = c.get(f"/panel/{aid}").get_data(as_text=True)
+    assert "kârlılığa göre sınıflandı" in p and "Brüt kâr" in p
+    assert "kârlılığa göre sınıflandı" not in c.get(f"/panel/{aid}?abc=ciro").get_data(as_text=True)
+    for tur in ("urun", "musteri"):
+        h = c.get(f"/abc/{aid}/{tur}").get_data(as_text=True)
+        assert "Kârlılığa göre:" in h and "Marj" in h and "Faturalar ›" in h
+        assert "Kârlılığa göre:" not in c.get(f"/abc/{aid}/{tur}?abc=ciro").get_data(as_text=True)
+    assert "Kârlılığa göre:" not in c.get(f"/abc/{aid}/tedarikci").get_data(as_text=True)
+    yol = tmp_path / "r.xlsx"
+    yol.write_bytes(c.get(f"/indir/{aid}/excel").data)
+    adlar = openpyxl.load_workbook(yol, read_only=True).sheetnames
+    assert {"Ürün ABC (Kâr)", "Müşteri ABC (Kâr)", "Ürün ABC (Ciro)", "Müşteri ABC (Ciro)"} <= set(adlar)
+    assert adlar.index("Ürün ABC (Kâr)") < adlar.index("Ürün ABC (Ciro)")

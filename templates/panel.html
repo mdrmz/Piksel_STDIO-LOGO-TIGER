@@ -108,13 +108,16 @@
 <h2>Aylık satış ve alış</h2>
 <div class="kart"><img src="data:image/png;base64,{{ grafik }}" style="width:100%;height:auto" alt="Aylık net satış ve alış grafiği"></div>
 
-<h2>ABC dağılımı</h2>
+<h2 id="abc">ABC dağılımı {% if kar_var %}<span class="kucuk" style="font-weight:400;margin-left:10px">
+  <a class="btn kucuk {{ '' if olcut == 'kar' else 'ikincil' }}" href="/panel/{{ aid }}{{ aq }}#abc">Kârlılığa göre</a>
+  <a class="btn kucuk {{ '' if olcut == 'ciro' else 'ikincil' }}" href="/panel/{{ aid }}?abc=ciro{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}#abc">Ciroya göre</a></span>{% endif %}</h2>
+{% set oq = ('&abc=ciro' if aq else '?abc=ciro') if olcut == 'ciro' and kar_var else '' %}
 <div class="izgara i3">
   {% for ad, oz in abc %}
   <div class="kart">
-    <h3>{{ ad }} <a class="kucuk" style="font-weight:400;float:right" href="/abc/{{ aid }}/{{ {'Ürün':'urun','Müşteri':'musteri','Tedarikçi':'tedarikci'}[ad] }}{{ aq }}">Tüm liste ›</a></h3>
+    <h3>{{ ad }} <a class="kucuk" style="font-weight:400;float:right" href="/abc/{{ aid }}/{{ {'Ürün':'urun','Müşteri':'musteri','Tedarikçi':'tedarikci'}[ad] }}{{ aq }}{{ oq }}">Tüm liste ›</a></h3>
     <table>
-      <tr><th>Sınıf</th><th class="s">Kalem</th><th class="s">Kalem payı</th><th class="s">Tutar payı</th></tr>
+      <tr><th>Sınıf</th><th class="s">Kalem</th><th class="s">Kalem payı</th><th class="s">{{ 'Kâr payı' if olcut == 'kar' and ad != 'Tedarikçi' else 'Tutar payı' }}</th></tr>
       {% for r in oz.itertuples() %}
       <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td><td class="s">{{ r.kalem_sayisi|int }}</td>
           <td class="s">{{ r.kalem_payi|yuzde }}</td><td class="s">{{ r.deger_payi|yuzde }}</td></tr>
@@ -123,16 +126,17 @@
   </div>
   {% endfor %}
 </div>
-<p class="kucuk soluk">A: tutarın ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı. Tam listeler için <b>Tüm liste</b>{% if fatura_var %}; bir ürüne ya da müşteriye tıklayınca o tutarı oluşturan faturalar açılır{% endif %}.</p>
+<p class="kucuk soluk">{% if olcut == 'kar' %}<b>Ürün ve müşteri kârlılığa göre sınıflandı:</b> A = tahmini brüt kârın çoğunu getirenler (maliyet: son alış fiyatı). Tedarikçi alış tutarına göre. {% endif %}A: {{ 'kârın' if olcut == 'kar' else 'tutarın' }} ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı. Tam listeler için <b>Tüm liste</b>{% if fatura_var %}; bir ürüne ya da müşteriye tıklayınca o tutarı oluşturan faturalar açılır{% endif %}.</p>
 
 <div class="izgara i2">
   <div>
     <h2>İlk 15 ürün</h2>
     <div class="kart" style="padding:8px 12px"><table>
-      <tr><th></th><th>Malzeme <a class="kucuk" style="font-weight:400" href="/abc/{{ aid }}/urun{{ aq }}">tüm liste ›</a></th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
+      <tr><th></th><th>Malzeme <a class="kucuk" style="font-weight:400" href="/abc/{{ aid }}/urun{{ aq }}{{ oq }}">tüm liste ›</a></th>{% if olcut == 'kar' %}<th class="s">Brüt kâr</th><th class="s">Marj</th>{% endif %}<th class="s">Net tutar</th><th class="s">Küm.</th></tr>
       {% for r in urun.itertuples() %}
       <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
           <td>{% if fatura_var %}<a href="/faturalar/{{ aid }}?urun_kod={{ r.malzeme_kod|urlencode }}&tur=satis&tur=satis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu tutarı oluşturan faturalar">{{ r.malzeme_ad }}</a>{% else %}{{ r.malzeme_ad }}{% endif %}<div class="kucuk soluk">{{ r.malzeme_kod }} · {{ r.grup_kod }}</div></td>
+          {% if olcut == 'kar' %}<td class="s"><b>{{ r.brut_kar|tl }}</b></td><td class="s">{{ r.kar_marji|yuzde }}</td>{% endif %}
           <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td></tr>
       {% endfor %}
     </table></div>
@@ -140,10 +144,11 @@
   <div>
     <h2>İlk 15 müşteri</h2>
     <div class="kart" style="padding:8px 12px"><table>
-      <tr><th></th><th>Müşteri <a class="kucuk" style="font-weight:400" href="/abc/{{ aid }}/musteri{{ aq }}">tüm liste ›</a></th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
+      <tr><th></th><th>Müşteri <a class="kucuk" style="font-weight:400" href="/abc/{{ aid }}/musteri{{ aq }}{{ oq }}">tüm liste ›</a></th>{% if olcut == 'kar' %}<th class="s">Brüt kâr</th><th class="s">Marj</th>{% endif %}<th class="s">Net tutar</th><th class="s">Küm.</th></tr>
       {% for r in musteri.itertuples() %}
       <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
-          <td>{% if fatura_var %}<a href="/faturalar/{{ aid }}?cari_kod={{ r.cari_kod|urlencode }}&tur=satis&tur=satis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu müşterinin faturaları">{{ r.cari_ad }}</a>{% else %}{{ r.cari_ad }}{% endif %}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }} · son alım {{ r.son_alim }}</div></td>
+          <td>{% if fatura_var %}<a href="/faturalar/{{ aid }}?cari_kod={{ r.cari_kod|urlencode }}&tur=satis&tur=satis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu müşterinin faturaları">{{ r.cari_ad }}</a>{% else %}{{ r.cari_ad }}{% endif %}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }}{% if olcut != 'kar' %} · son alım {{ r.son_alim }}{% endif %}</div></td>
+          {% if olcut == 'kar' %}<td class="s"><b>{{ r.brut_kar|tl }}</b></td><td class="s">{{ r.kar_marji|yuzde }}</td>{% endif %}
           <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td></tr>
       {% endfor %}
     </table></div>

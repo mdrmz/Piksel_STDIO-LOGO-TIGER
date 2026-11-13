@@ -468,6 +468,8 @@ def panel(aid):
     klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
     esik = AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95))
     u, m, t = a.urun_abc(esik=esik), a.musteri_abc(esik=esik), a.tedarikci_abc(esik=esik)
+    olcut = _abc_olcut(a)
+    ku, km = (a.kar_abc("malzeme", esik), a.kar_abc("cari", esik)) if olcut == "kar" else (None, None)
     trend = a.aylik_trend()
     olu = a.olu_stok(bilgi.get("olu_stok_gun", 90))
     olu_gun = bilgi.get("olu_stok_gun", 90)
@@ -490,8 +492,11 @@ def panel(aid):
         depo=a.depo_kirilim(), ambar_urun=a.ambar_urun(), eski_surum=a.eski_surum,
         ambarlar=a.ambarlar if len(a.ambarlar) > 1 and not a.eski_surum else [], ambar_secili=a.ambar_secili,
         ambar_secili_ad=a.ambar_secili_ad, aq=f"?ambar={a.ambar_secili}" if a.ambar_secili is not None else "",
-        abc=[("Ürün", abc_ozet(u, "net_tutar")), ("Müşteri", abc_ozet(m, "net_tutar")), ("Tedarikçi", abc_ozet(t, "net_tutar"))],
-        urun=u.head(15), musteri=m.head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
+        abc=[("Ürün", abc_ozet(ku if olcut == "kar" else u, "brut_kar" if olcut == "kar" else "net_tutar")),
+             ("Müşteri", abc_ozet(km if olcut == "kar" else m, "brut_kar" if olcut == "kar" else "net_tutar")),
+             ("Tedarikçi", abc_ozet(t, "net_tutar"))],
+        olcut=olcut, kar_var=a.maliyet_var, urun=(ku if olcut == "kar" else u).head(15),
+        musteri=(km if olcut == "kar" else m).head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
         kaynak_acik=bool(DURUM["firmalar"]), yz_hazir=yz.hazir_mi(), yz_ayar=yz.ayar(), fatura_var=_fatura_var(a),
         yorum_html=_kayitli_yorum(klasor), gecmis=[(g["soru"], yz.md_html(g["cevap"])) for g in GECMIS.get(aid, [])])
@@ -499,6 +504,13 @@ def panel(aid):
 
 # ---------------------------------------------------------------------------- faturalar ve tam ABC listesi
 SAYFA_BOYU = 100
+
+
+def _abc_olcut(a):
+    """ABC neye göre: 'kar' (tahmini brüt kâr; maliyet verisi varsa varsayılan) ya da 'ciro' (?abc=ciro)."""
+    if not a.maliyet_var or request.args.get("abc") == "ciro":
+        return "ciro"
+    return "kar"
 
 
 def _fatura_var(a):
@@ -582,8 +594,13 @@ def abc_liste(aid, tur):
         abort(404)
     klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
     esik = AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95))
-    t = {"urun": a.urun_abc, "musteri": a.musteri_abc, "tedarikci": a.tedarikci_abc}[tur](esik=esik)
-    return render_template("abc.html", aid=aid, bilgi=bilgi, tur=tur, t=t, esik=esik, ozet=abc_ozet(t, "net_tutar"),
+    olcut = "ciro" if tur == "tedarikci" else _abc_olcut(a)
+    if olcut == "kar":
+        t = a.kar_abc("malzeme" if tur == "urun" else "cari", esik)
+    else:
+        t = {"urun": a.urun_abc, "musteri": a.musteri_abc, "tedarikci": a.tedarikci_abc}[tur](esik=esik)
+    return render_template("abc.html", aid=aid, bilgi=bilgi, tur=tur, t=t, esik=esik, olcut=olcut, kar_var=a.maliyet_var,
+                           ozet=abc_ozet(t, "brut_kar" if olcut == "kar" else "net_tutar"),
                            ambar_secili=a.ambar_secili, ambar_secili_ad=a.ambar_secili_ad,
                            fatura_var=_fatura_var(a))
 

@@ -90,8 +90,8 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 |---|---|
 | **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
-| **Ürün ABC** | Net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
-| **Müşteri ABC** | Net satış, fatura sayısı, son alım tarihi |
+| **Ürün ABC** | Kârlılığa göre (A = tahmini brüt kârın çoğunu getirenler) ya da net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
+| **Müşteri ABC** | Kârlılığa ya da net satışa göre; brüt kâr, marj, fatura sayısı, son alım tarihi |
 | **Tedarikçi ABC** | Net alış tutarına göre |
 | **Aylık trend** | Aylık satış/alış ve geçen yılın aynı ayına göre değişim |
 | **Grup satış** | Malzeme grubu (`STGRPCODE`) kırılımı |

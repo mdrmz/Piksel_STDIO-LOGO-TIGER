@@ -7,15 +7,21 @@
 <style> table.abc tr:hover td { background:#F7F9FC; } .sinif-sec a { margin-right:6px; } </style>
 <p class="kucuk"><a href="/panel/{{ aid }}{{ '?ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">‹ Panele dön</a></p>
 <h1>{{ ad }} ABC analizi <span class="soluk" style="font-weight:400;font-size:16px">· {{ t|length }} {{ ad|lower }}{% if ambar_secili is not none %} · {{ ambar_secili_ad }}{% endif %}</span></h1>
-<p class="soluk kucuk">{{ 'Net alış' if tur == 'tedarikci' else 'Net satış' }} tutarına göre (KDV hariç, iadeler düşülmüş).
-  A: tutarın ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı.
+{% if kar_var and tur != 'tedarikci' %}<p style="margin:8px 0">
+  <a class="btn kucuk {{ '' if olcut == 'kar' else 'ikincil' }}" href="/abc/{{ aid }}/{{ tur }}{{ '?ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">Kârlılığa göre</a>
+  <a class="btn kucuk {{ '' if olcut == 'ciro' else 'ikincil' }}" href="/abc/{{ aid }}/{{ tur }}?abc=ciro{{ aq }}">Ciroya göre</a></p>{% endif %}
+<p class="soluk kucuk">{% if olcut == 'kar' %}<b>Kârlılığa göre:</b> tahmini brüt kâr = net satış − (satış miktarı × o tarihteki son alış fiyatı).
+  A sınıfı kârın çoğunu getirenlerdir. Kârı sıfır ya da eksi olanlar listenin sonunda <b>zarar</b> işaretiyle durur; hiç alış/devir kaydı
+  olmayan (maliyeti bilinmeyen) kalemler bu listede yoktur.
+  {% else %}{{ 'Net alış' if tur == 'tedarikci' else 'Net satış' }} tutarına göre (KDV hariç, iadeler düşülmüş).{% endif %}
+  A: {{ 'kârın' if olcut == 'kar' else 'tutarın' }} ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı.
   {% if fatura_var %}<b>Faturalar</b>'a tıklayınca bu tutarı oluşturan faturalar tek tek açılır; Logo ile oradan sağlayabilirsiniz.{% endif %}</p>
 
 <div class="izgara i3" style="margin:12px 0">
   {% for r in ozet.itertuples() %}
   <div class="kart kpi"><div class="ad"><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span> sınıfı</div>
     <div class="deger">{{ r.kalem_sayisi|tl }} <span class="kucuk soluk" style="font-weight:400">{{ ad|lower }} ({{ r.kalem_payi|yuzde }})</span></div>
-    <div class="kucuk soluk">{{ r.toplam|tl }} ₺ · tutarın {{ r.deger_payi|yuzde }}'i</div></div>
+    <div class="kucuk soluk">{{ r.toplam|tl }} ₺ {{ 'kâr' if olcut == 'kar' else '' }} · {{ 'kârın' if olcut == 'kar' else 'tutarın' }} {{ r.deger_payi|yuzde }}'i</div></div>
   {% endfor %}
 </div>
 
@@ -26,7 +32,8 @@
 </div>
 <div class="kart" style="padding:6px 10px;overflow-x:auto"><table class="abc" id="tablo">
   <tr><th class="s">Sıra</th><th></th>
-    {% if tur == 'urun' %}<th>Malzeme</th><th>Grup</th><th class="s">Net tutar</th><th class="s">Miktar</th>
+    {% if olcut == 'kar' %}<th>{{ ad }}</th><th>{{ 'Grup' if tur == 'urun' else 'Şehir' }}</th><th class="s">Brüt kâr</th><th class="s">Marj</th><th class="s">Net satış</th><th class="s">Maliyet</th><th title="Ciroya göre ABC sınıfı">Ciro</th>
+    {% elif tur == 'urun' %}<th>Malzeme</th><th>Grup</th><th class="s">Net tutar</th><th class="s">Miktar</th>
     {% elif tur == 'musteri' %}<th>Müşteri</th><th>Şehir</th><th class="s">Net tutar</th><th class="s">Fatura</th><th>Son alım</th>
     {% else %}<th>Tedarikçi</th><th>Şehir</th><th class="s">Net tutar</th>{% endif %}
     <th class="s">Pay</th><th class="s">Kümülatif</th>{% if fatura_var %}<th></th>{% endif %}</tr>
@@ -34,7 +41,13 @@
   {% set kod = r.malzeme_kod if tur == 'urun' else r.cari_kod %}
   <tr data-s="{{ r.sinif }}" data-ara="{{ (kod ~ ' ' ~ (r.malzeme_ad if tur == 'urun' else r.cari_ad))|lower }}">
     <td class="s soluk">{{ r.sira }}</td><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
-    {% if tur == 'urun' %}
+    {% if olcut == 'kar' %}
+    <td>{{ r.malzeme_ad if tur == 'urun' else r.cari_ad }}{% if r.zarar %} <span class="rozet rC">zarar</span>{% endif %}<div class="kucuk soluk">{{ kod }}</div></td>
+    <td>{{ r.grup_kod if tur == 'urun' else r.sehir }}</td>
+    <td class="s"><b>{{ r.brut_kar|tl(2) }}</b></td><td class="s">{{ r.kar_marji|yuzde }}</td>
+    <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.maliyet|tl(2) }}</td>
+    <td>{% if r.ciro_sinif != '-' %}<span class="rozet r{{ r.ciro_sinif }}">{{ r.ciro_sinif }}</span>{% endif %}</td>
+    {% elif tur == 'urun' %}
     <td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }}</div></td><td>{{ r.grup_kod }}</td>
     <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.toplam_miktar|tl(2) }}</td>
     {% elif tur == 'musteri' %}

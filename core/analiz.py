@@ -152,6 +152,31 @@ class Analiz:
         return t[["sira", "sinif", "cari_kod", "cari_ad", "sehir", "ozel_kod", "net_tutar", "fatura_sayisi",
                   "son_alim", "pay", "kumulatif_pay"]]
 
+    def kar_abc(self, seviye: str = "malzeme", esik=None):
+        """Kârlılığa göre ABC: A = toplam tahmini brüt kârın ilk %80'ini getiren ürünler/müşteriler.
+        Kârı sıfır ya da eksi olanlar (zararına satış) C'nin sonunda 'zarar' işaretiyle listelenir.
+        Maliyeti bulunamayan (hiç alışı/devri olmayan) kalemler listede yer almaz. Maliyet yoksa None."""
+        k = self.karlilik(seviye)
+        if k is None:
+            return None
+        kod = "malzeme_kod" if seviye == "malzeme" else "cari_kod"
+        k = k.drop(columns=["sira", "kar_payi"])
+        t = abc(k, kod, "brut_kar", esik)[[kod, "sira", "sinif", "pay", "kumulatif_pay"]]
+        t = k.merge(t, on=kod, how="left")
+        t["zarar"] = t["sinif"].isna()
+        t["sinif"] = t["sinif"].fillna("C")
+        t["pay"] = t["pay"].fillna(0.0)
+        t = t.sort_values(["zarar", "brut_kar"], ascending=[True, False], kind="mergesort").reset_index(drop=True)
+        t["kumulatif_pay"] = t["kumulatif_pay"].fillna(1.0)
+        t["sira"] = np.arange(1, len(t) + 1)
+        # karşılaştırma için ciroya göre sınıfı da yanında
+        ciro = (self.urun_abc(esik=esik) if seviye == "malzeme" else self.musteri_abc(esik))[[kod, "sinif"]]
+        t = t.merge(ciro.rename(columns={"sinif": "ciro_sinif"}), on=kod, how="left")
+        t["ciro_sinif"] = t["ciro_sinif"].fillna("-")
+        on = ["sira", "sinif", "malzeme_kod", "malzeme_ad", "grup_kod"] if seviye == "malzeme" else ["sira", "sinif", "cari_kod", "cari_ad", "sehir"]
+        return t[on + ["brut_kar", "kar_marji", "net_tutar", "maliyet"] + (["toplam_miktar"] if seviye == "malzeme" else [])
+                 + ["pay", "kumulatif_pay", "ciro_sinif", "zarar"]]
+
     def tedarikci_abc(self, esik=None):
         t = abc(self.alis, "cari_ref", "net_tutar", esik)
         t = t.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")

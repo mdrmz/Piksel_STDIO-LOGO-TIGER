@@ -1,5 +1,16 @@
 # Değişiklik günlüğü
 
+## v0.7.1 — 2026-11-13
+- **ABC artık kârlılığa göre:** ürün ve müşteri ABC'sinde A sınıfı, tahmini brüt kârın çoğunu (ilk %80) getirenlerdir
+  (önceden net satış tutarına göreydi). Panelde ve tam listede brüt kâr, marj, net satış ve maliyet birlikte görünür;
+  ciroya göre sınıf da yanında durur. Kârı sıfır ya da eksi olanlar listenin sonunda **zarar** işaretiyle yer alır.
+  **Ciroya göre** düğmesiyle eski görünüme geçilir. Maliyet verisi olmayan yedeklerde ABC ciroya göre kalır.
+- Maliyet, her satış için o tarihteki son alış fiyatıdır (tahmini); hiç alış/devir kaydı olmayan ürünler kâr ABC'sinde
+  yer almaz.
+- Excel raporunda **Ürün ABC (Kâr)** ve **Müşteri ABC (Kâr)** sayfaları öne eklendi; eski sayfalar
+  **Ürün ABC (Ciro)** / **Müşteri ABC (Ciro)** adıyla duruyor. Tedarikçi ABC alış tutarına göredir.
+- PDF özet, Power BI raporu ve yapay zekâ özeti şimdilik ciroya göre ABC kullanmaya devam ediyor.
+
 ## v0.7.0 — 2026-11-13
 Faturaları tek tek görme, filtreleme ve Logo ile sağlama.
 - **Faturalar ekranı** (panelde **Faturalar** düğmesi): yedekteki tüm faturalar (iptaller dahil) tek tek listelenir.

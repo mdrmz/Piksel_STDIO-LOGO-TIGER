@@ -17,6 +17,7 @@ RAPOR_SATIR_SINIRI = 200_000   # Excel raporundaki fatura satırı sayfası (faz
 SINIF_RENK = {"A": "#C6EFCE", "B": "#FFEB9C", "C": "#F4CCCC"}
 
 BASLIK = {
+    "ciro_sinif": "Ciroya göre sınıf", "zarar": "Zarar",
     "sira": "Sıra", "sinif": "Sınıf", "malzeme_kod": "Malzeme kodu", "malzeme_ad": "Malzeme adı",
     "grup_kod": "Grup", "net_tutar": "Net tutar (TL)", "toplam_miktar": "Miktar", "pay": "Pay",
     "kumulatif_pay": "Kümülatif pay", "cari_kod": "Cari kodu", "cari_ad": "Cari adı", "sehir": "Şehir",
@@ -108,11 +109,11 @@ def _genislik(ws, df, bas=0):
         ws.set_column(bas + j, bas + j, min(45, max(9, uz + 2)))
 
 
-def _abc_sayfa(wb, f, ad, baslik, tablo: pd.DataFrame, deger="net_tutar", esik=None):
+def _abc_sayfa(wb, f, ad, baslik, tablo: pd.DataFrame, deger="net_tutar", esik=None, ek_not=""):
     ws = wb.add_worksheet(ad)
     ws.write(0, 0, baslik, f["h1"])
     e = esik or AbcEsik()
-    ws.write(1, 0, f"A: tutarın ilk %{e.a * 100:.0f}'i · B: %{e.b * 100:.0f}'e kadar · C: kalanı", f["not"])
+    ws.write(1, 0, f"A: tutarın ilk %{e.a * 100:.0f}'i · B: %{e.b * 100:.0f}'e kadar · C: kalanı. {ek_not}", f["not"])
     oz = abc_ozet(tablo, deger)
     son = _tablo_yaz(ws, f, oz, 3)
     bas = max(son + 3, 21)  # Pareto grafiği tablonun üstünde kalsın
@@ -244,8 +245,14 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
                 r += 1
 
         # ---- ABC sayfaları
-        _abc_sayfa(wb, f, "Ürün ABC", "Ürün ABC analizi (net satış tutarına göre)", a.urun_abc(esik=esik), esik=esik)
-        _abc_sayfa(wb, f, "Müşteri ABC", "Müşteri ABC analizi (net satış tutarına göre)", a.musteri_abc(esik), esik=esik)
+        for seviye, sayfa_ad, ne in (("malzeme", "Ürün ABC (Kâr)", "Ürün"), ("cari", "Müşteri ABC (Kâr)", "Müşteri")):
+            kt = a.kar_abc(seviye, esik)
+            if kt is not None and len(kt):
+                kt = kt.assign(zarar=kt["zarar"].map({True: "Zarar", False: ""}))
+                _abc_sayfa(wb, f, sayfa_ad, f"{ne} ABC analizi — kârlılığa göre (tahmini brüt kâr)", kt, deger="brut_kar",
+                           esik=esik, ek_not="A = kârın çoğunu getirenler. " + MALIYET_NOTU)
+        _abc_sayfa(wb, f, "Ürün ABC (Ciro)", "Ürün ABC analizi (net satış tutarına göre)", a.urun_abc(esik=esik), esik=esik)
+        _abc_sayfa(wb, f, "Müşteri ABC (Ciro)", "Müşteri ABC analizi (net satış tutarına göre)", a.musteri_abc(esik), esik=esik)
         _abc_sayfa(wb, f, "Tedarikçi ABC", "Tedarikçi ABC analizi (net alış tutarına göre)", a.tedarikci_abc(esik), esik=esik)
 
         # ---- Aylık trend
