@@ -24,7 +24,7 @@ from core import __version__
 from core.analiz import AbcEsik, Analiz, abc_ozet
 from core import kurulum, tanilama, yz
 from core.kaynak import BakKaynak, KaynakHatasi, MssqlKaynak, SqliteKaynak, birlestir
-from core.logo import AktarimAyari, aktar, firma_tanimlari, firmalari_tara
+from core.logo import AktarimAyari, aktar_coklu, firma_tanimlari, firmalari_tara
 
 TEMEL = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 CALISMA = os.environ.get("LOGO_ANALIZ_KLASOR", os.path.join(os.path.expanduser("~"), "LogoAnaliz"))
@@ -263,14 +263,22 @@ def firmalar():
 
 @app.route("/aktar", methods=["POST"])
 def aktar_baslat():
-    no = request.form.get("firma")
-    firma = next((f for f in DURUM["firmalar"] if f.no == no), None)
-    donemler = request.form.getlist(f"donem_{no}")
-    if not firma or not donemler:
-        return render_template("hata.html", mesaj="Bir firma ve en az bir dönem seçin.")
+    # Bir ya da birden fazla firma: yıl yıl ayrı firma açılmış şirketlerde seçilen firmalar tek analizde birleşir
+    nolar = list(dict.fromkeys(request.form.getlist("firma")))
+    secimler = []
+    for no in nolar:
+        firma = next((f for f in DURUM["firmalar"] if f.no == no), None)
+        donemler = request.form.getlist(f"donem_{no}")
+        if not firma:
+            return render_template("hata.html", mesaj=f"Firma {no} bu yedekte yok.")
+        if not donemler:
+            return render_template("hata.html", mesaj=f"Firma {no} için en az bir dönem seçin.")
+        secimler.append((firma, donemler))
+    if not secimler:
+        return render_template("hata.html", mesaj="En az bir firma ve dönem seçin.")
     ayar = AktarimAyari(sadece_faturali=bool(request.form.get("sadece_faturali")),
                         hizmetleri_dahil_et=bool(request.form.get("hizmetler")))
-    aid = f"{dt.datetime.now():%Y%m%d_%H%M%S}_F{no}"
+    aid = f"{dt.datetime.now():%Y%m%d_%H%M%S}_F{nolar[0]}" + (f"-{nolar[-1]}" if len(nolar) > 1 else "")
     klasor = os.path.join(CALISMA, aid)
     os.makedirs(klasor)
     kaynak, kaynak_ad = DURUM["kaynak"], DURUM["kaynak_ad"]
@@ -282,13 +290,17 @@ def aktar_baslat():
 
     def is_():
         try:
-            q = aktar(kaynak, firma, donemler, os.path.join(klasor, "analiz.sqlite"), ayar, ilerleme=IS.yaz)
+            q = aktar_coklu(kaynak, secimler, os.path.join(klasor, "analiz.sqlite"), ayar, ilerleme=IS.yaz)
         except Exception:
             shutil.rmtree(klasor, ignore_errors=True)
             raise
-        bilgi = {"firma": firma.no, "firma_ad": firma.ad, "donemler": donemler, "kaynak": kaynak_ad,
+        bilgi = {"firma": q["firma"], "firma_ad": q["firma_ad"], "donemler": q["donemler"].split(", "), "kaynak": kaynak_ad,
                  "olusturma": f"{dt.datetime.now():%d.%m.%Y %H:%M}", "tarih_bas": q["tarih_bas"], "tarih_bit": q["tarih_bit"],
                  "olu_stok_gun": olu_gun, "abc_a": abc_a, "abc_b": abc_b}
+        if len(secimler) > 1:
+            bilgi["firmalar"] = [{"no": f.no, "ad": f.ad, "donemler": d} for f, d in secimler]
+            if q.get("uyari"):
+                bilgi["uyari"] = q["uyari"]
         with open(os.path.join(klasor, "bilgi.json"), "w", encoding="utf-8") as fh:
             json.dump(bilgi, fh, ensure_ascii=False, indent=1)
         if not baska_firma:

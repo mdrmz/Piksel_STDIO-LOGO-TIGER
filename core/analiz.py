@@ -484,8 +484,12 @@ class Analiz:
 
     def veri_notlari(self):
         m = self.meta
-        return [
+        coklu = [("Birleştirilen firmalar", f"{m.get('firma_sayisi')} firma — {m.get('firma_araliklari', '')}. "
+                                            "Müşteri ve malzemeler koduna göre eşleştirildi.")] if m.get("firma_sayisi") else []
+        uyari = [("UYARI", m["uyari"])] if m.get("uyari") else []
+        return uyari + [
             ("Firma", f"{m.get('firma')} {m.get('firma_ad', '')}"),
+            *coklu,
             ("Dönemler", m.get("donemler", "")),
             ("Tarih aralığı", f"{m.get('tarih_bas')} – {m.get('tarih_bit')}"),
             ("Okunan ham satır", m.get("ham_satir")),

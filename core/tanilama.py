@@ -66,6 +66,7 @@ def _analiz_ozetleri():
         except (OSError, ValueError):
             continue
         adlar.append(bilgi.get("firma_ad", ""))
+        adlar += [f.get("ad", "") for f in bilgi.get("firmalar") or []]
         satir = {"id": os.path.basename(os.path.dirname(b)), "firma": bilgi.get("firma"), "donemler": bilgi.get("donemler"),
                  "tarih": [bilgi.get("tarih_bas"), bilgi.get("tarih_bit")], "olusturma": bilgi.get("olusturma")}
         depo = os.path.join(os.path.dirname(b), "analiz.sqlite")
@@ -73,7 +74,7 @@ def _analiz_ozetleri():
             con = sqlite3.connect(f"file:{depo}?mode=ro", uri=True)
             satir["satirlar"] = {t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                                  for t in ("fact_satis", "fact_alis", "dim_cari", "dim_malzeme", "stok_bakiye")}
-            satir["meta"] = {k_: v for k_, v in con.execute("SELECT anahtar, deger FROM meta") if k_ != "firma_ad"}
+            satir["meta"] = {k_: v for k_, v in con.execute("SELECT anahtar, deger FROM meta") if k_ not in ("firma_ad", "firma_adlari")}
             con.close()
         except sqlite3.Error as e:
             satir["hata"] = str(e)

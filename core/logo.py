@@ -19,6 +19,9 @@ Ek tablolar (yedekte varsa okunur, yoksa ilgili analiz "veri yok" der):
   LG_SLSMAN                satış elemanları               -> temsilci performansı
   L_CAPIWHOUSE             ambar adları                   -> depo kırılımı
 
+Birden fazla firma (aktar_coklu): aynı şirketin her yıl ayrı firma numarasıyla açıldığı kurulumlar için seçilen
+firmalar tek analizde birleşir; kartlar KOD ile eşleştirilir, stok ve cari bakiye en yeni firmadan alınır.
+
 Maliyet: Logo'nun maliyetlendirme servisi her firmada çalıştırılmadığı için satış maliyeti ALIŞ FİYATLARINDAN
 hesaplanır: her satış satırına, o malzemenin satış tarihinden önceki en son alış (yoksa devir/üretim girişi)
 birim maliyeti atanır. Bu "son alış maliyeti" yöntemidir; muhasebe kârı değil, yönetim amaçlı tahmini brüt kârdır.
@@ -174,19 +177,17 @@ class AktarimAyari:
     hizmetleri_dahil_et: bool = False  # LINETYPE=4 hizmet satırları
 
 
-def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: AktarimAyari | None = None,
-          ilerleme=None) -> dict:
-    """Ham Logo tablolarını okuyup temiz modeli hedef SQLite dosyasına yazar. Veri kalite özetini döner."""
-    ayar = ayar or AktarimAyari()
-    say = ilerleme or (lambda m: None)
+def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, say, coklu: bool) -> dict:
+    """Tek firmanın kartlarını ve seçilen dönemlerdeki stok hareketlerini okuyup temizler."""
     f = firma.no
-    kalite = {"firma": f, "firma_ad": firma.ad, "donemler": ", ".join(donemler)}
+    on = f"Firma {f} · " if coklu else ""
+    k = {"iptal_satir": 0, "malzeme_disi_satir": 0, "ham_satir": 0}
 
-    say("Cari kartlar okunuyor…")
+    say(f"{on}Cari kartlar okunuyor…")
     cari = _oku(kaynak, f"LG_{f}_CLCARD", {"LOGICALREF": 0, "CODE": "", "DEFINITION_": "", "CARDTYPE": 0,
                                          "CITY": "", "SPECODE": "", "CYPHCODE": "", "ACTIVE": 0})
     cari.columns = ["cari_ref", "cari_kod", "cari_ad", "cari_tur", "sehir", "ozel_kod", "yetki_kod", "pasif"]
-    say("Malzeme kartları okunuyor…")
+    say(f"{on}Malzeme kartları okunuyor…")
     mal = _oku(kaynak, f"LG_{f}_ITEMS", {"LOGICALREF": 0, "CODE": "", "NAME": "", "STGRPCODE": "",
                                        "SPECODE": "", "CARDTYPE": 0, "ACTIVE": 0})
     mal.columns = ["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod", "ozel_kod", "kart_tur", "pasif"]
@@ -197,33 +198,33 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
 
     satirlar = []
     for p in donemler:
-        say(f"Dönem {p}: fatura başlıkları okunuyor…")
+        say(f"{on}Dönem {p}: fatura başlıkları okunuyor…")
         inv = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {"LOGICALREF": 0, "FICHENO": "", "CANCELLED": 0, "TRCODE": 0,
                                                    "SALESMANREF": 0})
         inv.columns = ["invoiceref", "fatura_no", "fatura_iptal", "fatura_trcode", "fatura_temsilci"]
         inv["fatura_no"] = inv["fatura_no"].map(turkce_onar)
-        say(f"Dönem {p}: stok hareket satırları okunuyor…")
+        say(f"{on}Dönem {p}: stok hareket satırları okunuyor…")
         st = _oku(kaynak, f"LG_{f}_{p}_STLINE", {
             "LOGICALREF": 0, "STOCKREF": 0, "LINETYPE": 0, "TRCODE": 0, "IOCODE": 0, "DATE_": None,
             "INVOICEREF": 0, "CLIENTREF": 0, "SOURCEINDEX": 0, "AMOUNT": 0.0, "PRICE": 0.0, "TOTAL": 0.0,
             "DISTDISC": 0.0, "VATMATRAH": np.nan, "LINENET": np.nan, "UINFO1": 1.0, "UINFO2": 1.0,
             "CANCELLED": 0, "SALESMANREF": 0})
-        st["donem"] = p
+        st["donem"] = f"{f}/{p}" if coklu else p
         st = st.merge(inv, how="left", left_on="INVOICEREF", right_on="invoiceref")
         satirlar.append(st)
-        say(f"Dönem {p}: {len(st):,} satır okundu.".replace(",", "."))
+        say(f"{on}Dönem {p}: {len(st):,} satır okundu.".replace(",", "."))
     st = pd.concat(satirlar, ignore_index=True)
-    kalite["ham_satir"] = int(len(st))
+    k["ham_satir"] = int(len(st))
 
     # ---- temizlik
     st["tarih"] = pd.to_datetime(st["DATE_"], errors="coerce")
     for c in ["AMOUNT", "PRICE", "TOTAL", "DISTDISC", "VATMATRAH", "LINENET", "UINFO1", "UINFO2"]:
         st[c] = pd.to_numeric(st[c], errors="coerce")
     iptal = (st["CANCELLED"].fillna(0).astype(int) == 1) | (st["fatura_iptal"].fillna(0).astype(int) == 1)
-    kalite["iptal_satir"] = int(iptal.sum())
+    k["iptal_satir"] = int(iptal.sum())
     linetypes = [0, 4] if ayar.hizmetleri_dahil_et else [0]
     malzeme_disi = ~st["LINETYPE"].fillna(0).astype(int).isin(linetypes)
-    kalite["malzeme_disi_satir"] = int((malzeme_disi & ~iptal).sum())
+    k["malzeme_disi_satir"] = int((malzeme_disi & ~iptal).sum())
     st = st[~iptal & ~malzeme_disi].copy()
 
     u1 = st["UINFO1"].replace(0, np.nan).fillna(1.0)
@@ -244,7 +245,106 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
                             "IOCODE": "iocode", "INVOICEREF": "invoiceref_", "SOURCEINDEX": "ambar",
                             "SALESMANREF": "satis_temsilci_ref", "LOGICALREF": "satir_ref"})
     st["faturali"] = st["invoiceref_"].fillna(0).astype(int) > 0
+    if coklu:  # her yıl/firma fatura numarasını baştan başlatabilir: fatura sayısı karışmasın
+        st["fatura_no"] = f + "/" + st["fatura_no"].fillna("").astype(str)
+    # dönem başı devir fişi hariç gerçek hareketlerin tarih aralığı (firmalar arası çakışma kontrolü için)
+    gercek = st.loc[(st["trcode"] != 14) & st["tarih"].notna(), "tarih"]
+    return {"firma": firma, "donemler": list(donemler), "cari": cari, "mal": mal, "st": st, "kalite": k,
+            "bas": gercek.min() if len(gercek) else pd.NaT, "bit": gercek.max() if len(gercek) else pd.NaT}
 
+
+def _ortak_ref(parcalar: list[dict], tablo: str, ref: str, kod: str) -> pd.DataFrame:
+    """Firmalar arası ortak kart numarası: aynı KOD = aynı müşteri/malzeme. Her firmanın kendi LOGICALREF'i
+    ortak numaraya çevrilir. Kart bilgileri (ad, grup…) en yeni firmadaki halinden alınır.
+    Dönen tablo: ortak kartlar (ref = ortak numara). Her parçaya '_harita' (eski ref -> ortak ref) eklenir."""
+    tum = []
+    for i, p in enumerate(parcalar):
+        d = p[tablo].copy()
+        d["_anahtar"] = np.where(d[kod].astype(str).str.strip() != "", "K:" + d[kod].astype(str).str.strip(),
+                                 f"R{i}:" + d[ref].astype(str))
+        d["_sira"] = i
+        tum.append(d)
+    tum = pd.concat(tum, ignore_index=True)
+    kartlar = (tum.sort_values("_sira", ascending=False, kind="mergesort")
+               .drop_duplicates("_anahtar", keep="first").sort_values(["_sira", ref], kind="mergesort")
+               .reset_index(drop=True))
+    kartlar["_yeni"] = np.arange(1, len(kartlar) + 1)
+    numara = dict(zip(kartlar["_anahtar"], kartlar["_yeni"]))
+    for i, p in enumerate(parcalar):
+        d = tum[tum["_sira"] == i].drop_duplicates(ref)
+        p.setdefault("_harita", {})[ref] = dict(zip(d[ref], d["_anahtar"].map(numara)))
+    kartlar[ref] = kartlar["_yeni"]
+    return kartlar.drop(columns=["_anahtar", "_sira", "_yeni"])
+
+
+def _cevir(seri: pd.Series, harita: dict, i: int) -> pd.Series:
+    """Firma i'deki ref'leri ortak numaraya çevirir. Kartı olmayan ref'ler (0 hariç) çakışmasın diye eksi numara alır."""
+    s = pd.to_numeric(seri, errors="coerce").fillna(0).astype("int64")
+    yeni = s.map(harita)
+    yedek = np.where(s == 0, 0, -(int(i + 1) * 10 ** 10 + s))
+    return yeni.fillna(pd.Series(yedek, index=s.index)).astype("int64")
+
+
+def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: AktarimAyari | None = None,
+          ilerleme=None) -> dict:
+    """Ham Logo tablolarını okuyup temiz modeli hedef SQLite dosyasına yazar. Veri kalite özetini döner."""
+    return aktar_coklu(kaynak, [(firma, donemler)], hedef_db, ayar, ilerleme)
+
+
+def aktar_coklu(kaynak, secimler: list[tuple[Firma, list[str]]], hedef_db: str, ayar: AktarimAyari | None = None,
+                ilerleme=None) -> dict:
+    """
+    Bir ya da birden fazla firmayı tek analizde birleştirir.
+
+    Birden fazla firma: aynı şirketin her yıl ayrı firma numarasıyla açıldığı kurulumlar içindir (001 = 2024,
+    002 = 2025 …). Müşteri ve malzemeler KOD ile eşleştirilir (her firmada LOGICALREF farklıdır), satış/alış
+    tüm firmalardan toplanır; stok ve cari bakiye en yeni firmanın son döneminden alınır (devir fişi önceki
+    bakiyeyi taşır). Tarih aralıkları çakışırsa veya firmalar ortak kod paylaşmıyorsa uyarı yazılır.
+    """
+    ayar = ayar or AktarimAyari()
+    say = ilerleme or (lambda m: None)
+    coklu = len(secimler) > 1
+    parcalar = [_firma_oku(kaynak, f, d, ayar, say, coklu) for f, d in secimler]
+    if coklu:  # eskiden yeniye: en yeni firma (stok/cari bakiye kaynağı) sonda
+        parcalar.sort(key=lambda p: (pd.Timestamp.max if pd.isna(p["bas"]) else p["bas"], p["firma"].no))
+    en_yeni = parcalar[-1]
+    nolar = [p["firma"].no for p in parcalar]
+    kalite = {"firma": "-".join(nolar), "firma_ad": en_yeni["firma"].ad,
+              "donemler": ", ".join(f"{p['firma'].no}/{d}" if coklu else d for p in parcalar for d in p["donemler"])}
+    for anahtar in ("ham_satir", "iptal_satir", "malzeme_disi_satir"):
+        kalite[anahtar] = sum(p["kalite"][anahtar] for p in parcalar)
+    uyarilar = []
+
+    if coklu:
+        say("Firmalar birleştiriliyor (müşteri ve malzemeler koduna göre eşleştiriliyor)…")
+        kalite["firma_sayisi"] = len(parcalar)
+        kalite["firma_adlari"] = " | ".join(dict.fromkeys(p["firma"].ad for p in parcalar if p["firma"].ad))
+        kalite["firma_araliklari"] = "; ".join(
+            f"{p['firma'].no}: {p['bas']:%d.%m.%Y} – {p['bit']:%d.%m.%Y}" for p in parcalar if pd.notna(p["bas"]))
+        cari = _ortak_ref(parcalar, "cari", "cari_ref", "cari_kod")
+        mal = _ortak_ref(parcalar, "mal", "malzeme_ref", "malzeme_kod")
+        for i, p in enumerate(parcalar):
+            p["st"]["cari_ref"] = _cevir(p["st"]["cari_ref"], p["_harita"]["cari_ref"], i)
+            p["st"]["malzeme_ref"] = _cevir(p["st"]["malzeme_ref"], p["_harita"]["malzeme_ref"], i)
+        for onceki, sonraki in zip(parcalar, parcalar[1:]):
+            a, b = onceki["firma"].no, sonraki["firma"].no
+            if pd.notna(onceki["bit"]) and pd.notna(sonraki["bas"]) and onceki["bit"] >= sonraki["bas"]:
+                uyarilar.append(f"Firma {a} ({onceki['bas']:%d.%m.%Y} – {onceki['bit']:%d.%m.%Y}) ile firma {b} "
+                                f"({sonraki['bas']:%d.%m.%Y} – {sonraki['bit']:%d.%m.%Y}) tarihleri çakışıyor; "
+                                f"aynı hareketler iki kez sayılıyor olabilir. Doğru dönemleri seçtiğinizden emin olun.")
+            ka = set(onceki["cari"]["cari_kod"]) - {""}
+            kb = set(sonraki["cari"]["cari_kod"]) - {""}
+            if ka and kb and len(ka & kb) / min(len(ka), len(kb)) < 0.2:
+                uyarilar.append(f"Firma {a} ile firma {b} çok az ortak cari kodu paylaşıyor; farklı şirketler olabilir. "
+                                f"Yalnızca aynı şirketin farklı yıllarını birlikte analiz edin.")
+    else:
+        cari, mal = en_yeni["cari"], en_yeni["mal"]
+    for u in uyarilar:
+        say("UYARI: " + u)
+    if uyarilar:
+        kalite["uyari"] = " ".join(uyarilar)
+
+    st = pd.concat([p["st"] for p in parcalar], ignore_index=True)
     hareket = st[["satir_ref", "donem", "tarih", "trcode", "hareket", "iocode", "malzeme_ref", "cari_ref",
                   "ambar", "faturali", "fatura_no", "miktar", "net_tutar", "satis_temsilci_ref"]].copy()
 
@@ -263,7 +363,7 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
     satis = _fakt(SATIS, "satis")
     alis = _fakt(ALIS, "alis")
 
-    # ---- maliyet: her satış satırına o tarihteki son alış birim maliyeti
+    # ---- maliyet: her satış satırına o tarihteki son alış birim maliyeti (firmalar arası da sürer)
     say("Satış maliyetleri hesaplanıyor (son alış fiyatına göre)…")
     giris = st[st["trcode"].isin(MALIYET_KAYNAGI) & (st["miktar"] > 0) & (st["_giris_tutar"] > 0) & st["tarih"].notna()]
     gunluk = giris.groupby(["malzeme_ref", "tarih"], as_index=False).agg(_t=("_giris_tutar", "sum"), _m=("miktar", "sum"))
@@ -280,8 +380,9 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
                .groupby("malzeme_ref", as_index=False)["cari_ref"].last().rename(columns={"cari_ref": "son_tedarikci_ref"}))
     malzeme_maliyet = son_maliyet.merge(son_ted, on="malzeme_ref", how="left")
 
-    # ---- stok bakiyesi: en son seçilen dönemden (o dönemin devir fişi önceki bakiyeyi taşır)
-    son = max(donemler)
+    # ---- stok bakiyesi: en yeni firmanın en son seçilen döneminden (o dönemin devir fişi önceki bakiyeyi taşır)
+    son_p = max(en_yeni["donemler"])
+    son = f"{en_yeni['firma'].no}/{son_p}" if coklu else son_p
     s = hareket[hareket["donem"] == son]
     yon = np.select([s["iocode"].isin([1, 2]), s["iocode"].isin([3, 4])], [1, -1], 0)
     stok = (s.assign(m=s["miktar"] * yon).groupby("malzeme_ref", as_index=False)["m"].sum()
@@ -292,19 +393,21 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
 
     mevcut_tablolar = {t.upper() for t in kaynak.tablolar()}
 
-    # ---- ambar adları (L_CAPIWHOUSE aynı veritabanındaysa)
+    # ---- ambar adları (L_CAPIWHOUSE): en yeni firmadaki ad öncelikli
     ambar_no = sorted(set(pd.to_numeric(hareket["ambar"], errors="coerce").fillna(0).astype(int)))
     ambar_ad = {}
     if "L_CAPIWHOUSE" in mevcut_tablolar:
         try:
             w = _oku(kaynak, "L_CAPIWHOUSE", {"FIRMNR": 0, "NR": 0, "NAME": ""})
-            w = w[pd.to_numeric(w["FIRMNR"], errors="coerce") == int(f)]
-            ambar_ad = {int(r.NR): turkce_onar(str(r.NAME or "").strip()) for r in w.itertuples()}
+            w["FIRMNR"] = pd.to_numeric(w["FIRMNR"], errors="coerce")
+            for p in reversed(parcalar):
+                for r in w[w["FIRMNR"] == int(p["firma"].no)].itertuples():
+                    ambar_ad.setdefault(int(r.NR), turkce_onar(str(r.NAME or "").strip()))
         except Exception:
             pass
     dim_ambar = pd.DataFrame({"ambar": ambar_no, "ambar_ad": [ambar_ad.get(n) or f"Ambar {n}" for n in ambar_no]})
 
-    # ---- satış elemanları (LG_SLSMAN)
+    # ---- satış elemanları (LG_SLSMAN: firmalar arasında ortak tablo)
     dim_temsilci = pd.DataFrame(columns=["temsilci_ref", "temsilci_kod", "temsilci_ad"])
     if "LG_SLSMAN" in mevcut_tablolar:
         try:
@@ -316,16 +419,19 @@ def aktar(kaynak, firma: Firma, donemler: list[str], hedef_db: str, ayar: Aktari
         except Exception:
             pass
 
-    # ---- cari hareketler: en son dönemden (o dönemin devir/açılış fişi önceki bakiyeyi taşır)
+    # ---- cari hareketler: en yeni firmanın en son döneminden (devir/açılış fişi önceki bakiyeyi taşır)
     cari_hareket = pd.DataFrame(columns=["hareket_ref", "cari_ref", "tarih", "trcode", "hareket", "borc", "alacak"])
-    if f"LG_{f}_{son}_CLFLINE" in mevcut_tablolar:
+    fn = en_yeni["firma"].no
+    if f"LG_{fn}_{son_p}_CLFLINE" in mevcut_tablolar:
         say(f"Dönem {son}: cari hareketler okunuyor…")
-        cl = _oku(kaynak, f"LG_{f}_{son}_CLFLINE", {"LOGICALREF": 0, "CLIENTREF": 0, "DATE_": None, "TRCODE": 0,
-                                                    "SIGN": 0, "AMOUNT": 0.0, "CANCELLED": 0})
+        cl = _oku(kaynak, f"LG_{fn}_{son_p}_CLFLINE", {"LOGICALREF": 0, "CLIENTREF": 0, "DATE_": None, "TRCODE": 0,
+                                                       "SIGN": 0, "AMOUNT": 0.0, "CANCELLED": 0})
         cl["AMOUNT"] = pd.to_numeric(cl["AMOUNT"], errors="coerce").fillna(0.0)
         cl_iptal = pd.to_numeric(cl["CANCELLED"], errors="coerce").fillna(0).astype(int) == 1
         kalite["cari_iptal_satir"] = int(cl_iptal.sum())
         cl = cl[~cl_iptal]
+        if coklu:
+            cl["CLIENTREF"] = _cevir(cl["CLIENTREF"], en_yeni["_harita"]["cari_ref"], len(parcalar) - 1)
         isaret = pd.to_numeric(cl["SIGN"], errors="coerce").fillna(0).astype(int)
         trc = pd.to_numeric(cl["TRCODE"], errors="coerce").fillna(0).astype(int)
         cari_hareket = pd.DataFrame({

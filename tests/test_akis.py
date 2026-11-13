@@ -547,7 +547,7 @@ def test_firma_secim_ekrani_iki_yedek(tmp_path, monkeypatch):
     h = A.app.test_client().get("/firmalar").get_data(as_text=True)
     assert "DEMO YAPI MARKET" in h and "DEMO ŞUBE" in h and "01.01.2025 – 31.12.2025" in h
     assert "verisi olmayan 1 firma" in h and "BAŞKA FİRMA" in h
-    assert 'name="firma" value="001" id="r001" required >' in h   # birden çok firmada hiçbiri önceden seçili değil
+    assert 'class="firma-sec" name="firma" value="001" id="r001" >' in h   # birden çok firmada hiçbiri önceden seçili değil
     A._kaynagi_kapat()
 
 
@@ -612,3 +612,146 @@ def test_iki_yedek_arayuz_akisi(tmp_path, monkeypatch):
     assert "bulunamadı" in c.post("/kaynak", data={"tur": "bak", "bak_yol2": str(tmp_path / "yok.bak")}).get_data(as_text=True)
     r = c.post("/kaynak", data={"tur": "bak", "bak_yol": f"{sistem}\n{veri}", "bak_yol2": str(bozuk)})
     assert "En fazla iki" in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------- yıl yıl ayrı firma: birleşik analiz
+KAYDIR = 5000  # yeni yılın firmasında kartların LOGICALREF'i farklı: eşleştirme koda göre yapılmalı
+
+
+def _yillik_firmalar(tmp_path, kod_on=""):
+    """Demo firma 001'i Logo'da her yıl ayrı firma açılmış gibi böler: 010 = 2025 (dönem 01), 011 = 2026 (dönem 01).
+    011'de cari/malzeme LOGICALREF'leri kaydırılır; kod_on verilirse 011'in cari kodları değiştirilir (farklı şirket)."""
+    yol = str(tmp_path / "yillik.sqlite")
+    src = sqlite3.connect(DEMO)
+    con = sqlite3.connect(yol)
+
+    def kopya(eski, yeni, donustur=None):
+        ddl = src.execute("SELECT sql FROM sqlite_master WHERE name=?", (eski,)).fetchone()[0]
+        con.execute(ddl.replace(eski, yeni, 1))
+        kolon = [r[1] for r in src.execute(f"PRAGMA table_info({eski})")]
+        rows = [dict(zip(kolon, r)) for r in src.execute(f"SELECT * FROM {eski}")]
+        if donustur:
+            rows = [donustur(r) for r in rows]
+        con.executemany(f"INSERT INTO {yeni} VALUES ({','.join('?' * len(kolon))})", [[r[k] for k in kolon] for r in rows])
+
+    def kart(r):
+        r["LOGICALREF"] += KAYDIR
+        if kod_on and "DEFINITION_" in r:
+            r["CODE"] = kod_on + r["CODE"]
+        return r
+
+    def hareket(r):
+        for k in ("STOCKREF", "CLIENTREF"):
+            if k in r and r[k]:
+                r[k] += KAYDIR
+        return r
+
+    for t in ("CLCARD", "ITEMS"):
+        kopya(f"LG_001_{t}", f"LG_010_{t}")
+        kopya(f"LG_001_{t}", f"LG_011_{t}", kart)
+    for t in ("INVOICE", "STLINE", "CLFLINE"):
+        kopya(f"LG_001_01_{t}", f"LG_010_01_{t}")
+        kopya(f"LG_001_02_{t}", f"LG_011_01_{t}", hareket)
+    for t in ("LG_SLSMAN", "L_CAPIWHOUSE"):
+        kopya(t, t, (lambda r: {**r, "FIRMNR": 10}) if t == "L_CAPIWHOUSE" else None)
+    con.execute("INSERT INTO L_CAPIWHOUSE SELECT 11, NR, NAME FROM L_CAPIWHOUSE WHERE FIRMNR = 10")
+    con.execute("CREATE TABLE L_CAPIFIRM (NR INTEGER, NAME TEXT, TITLE TEXT)")
+    con.executemany("INSERT INTO L_CAPIFIRM VALUES (?,?,?)", [(10, "DEMO YAPI 2025", ""), (11, "DEMO YAPI 2026", "")])
+    con.commit()
+    con.close()
+    return yol
+
+
+def _ref_analiz(tmp_path):
+    ref = str(tmp_path / "ref.sqlite")
+    k = SqliteKaynak(DEMO)
+    aktar(k, next(f for f in firmalari_tara(k) if f.no == "001"), ["01", "02"], ref)
+    return Analiz(ref)
+
+
+def test_yillik_firmalar_birlesik_analiz(tmp_path):
+    from core.logo import aktar_coklu
+    k = SqliteKaynak(_yillik_firmalar(tmp_path))
+    fs = {f.no: f for f in firmalari_tara(k)}
+    assert set(fs) == {"010", "011"}
+    yol = str(tmp_path / "birlesik.sqlite")
+    log = []
+    # seçim sırası önemsiz: tarihe göre sıralanır, stok/cari bakiye en yeni firmadan (011) alınır
+    q = aktar_coklu(k, [(fs["011"], ["01"]), (fs["010"], ["01"])], yol, ilerleme=log.append)
+    assert q["firma"] == "010-011" and q["firma_ad"] == "DEMO YAPI 2026" and q["donemler"] == "010/01, 011/01"
+    assert "uyari" not in q, q.get("uyari")
+    a, b = Analiz(yol), _ref_analiz(tmp_path)
+    oa, ob = a.ozet(), b.ozet()
+    for anahtar in ("net_satis", "net_alis", "iade_tutar", "brut_kar", "fatura_sayisi", "musteri_sayisi",
+                    "urun_sayisi", "tedarikci_sayisi"):
+        assert oa[anahtar] == pytest.approx(ob[anahtar], abs=0.01), anahtar
+    # aynı müşteri iki yılda tek kişi sayılır (kod eşleşmesi): müşteri ABC ilk 20 aynı
+    assert a.musteri_abc().head(20)["cari_kod"].tolist() == b.musteri_abc().head(20)["cari_kod"].tolist()
+    assert len(a.cari) == len(b.cari) and len(a.malzeme) == len(b.malzeme)
+    # stok ve alacak en yeni firmanın son döneminden: tek firmalı analizle aynı
+    sa = a.stok.merge(a.malzeme[["malzeme_ref", "malzeme_kod"]]).set_index("malzeme_kod")["stok_miktar"].sort_index()
+    sb = b.stok.merge(b.malzeme[["malzeme_ref", "malzeme_kod"]]).set_index("malzeme_kod")["stok_miktar"].sort_index()
+    assert (sa - sb).abs().max() < 1e-6
+    for anahtar in ("alacak", "borc"):
+        assert a.cari_ozet()[anahtar] == pytest.approx(b.cari_ozet()[anahtar], abs=0.01)
+    assert a.depo_kirilim()["ambar_ad"].tolist() == ["MERKEZ DEPO", "ŞUBE DEPO"]
+    # geçen yıla göre karşılaştırma iki firmanın verisini birlikte kullanır
+    assert len(a.donem_karsilastirma("cari")) == len(b.donem_karsilastirma("cari"))
+    notlar = dict(a.veri_notlari())
+    assert "Birleştirilen firmalar" in notlar and notlar["Stok bakiyesinin alındığı dönem"] == "011/01"
+
+
+def test_yillik_firmalar_uyarilari(tmp_path):
+    from core.kaynak import BirlesikKaynak
+    from core.logo import aktar_coklu
+    # tarihleri çakışan firmalar (aynı yıl iki firmada seçilmiş): çift sayım uyarısı
+    (tmp_path / "a").mkdir()
+    k = SqliteKaynak(_yillik_firmalar(tmp_path / "a"))
+    fs = {f.no: f for f in firmalari_tara(k)}
+    demo = SqliteKaynak(DEMO)
+    f001 = next(f for f in firmalari_tara(demo) if f.no == "001")
+    q = aktar_coklu(BirlesikKaynak([k, demo]), [(fs["010"], ["01"]), (f001, ["01"])], str(tmp_path / "c.sqlite"))
+    assert "çakışıyor" in q["uyari"]
+    # ortak cari kodu olmayan firmalar: farklı şirket uyarısı
+    (tmp_path / "b").mkdir()
+    k3 = SqliteKaynak(_yillik_firmalar(tmp_path / "b", kod_on="X"))
+    fs3 = {f.no: f for f in firmalari_tara(k3)}
+    q = aktar_coklu(k3, [(fs3["010"], ["01"]), (fs3["011"], ["01"])], str(tmp_path / "d.sqlite"))
+    assert "farklı şirketler olabilir" in q["uyari"] and "çakışıyor" not in q["uyari"]
+
+
+def test_yillik_firmalar_arayuz_ve_yz_maskesi(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path / "calisma"))
+    import importlib
+    import json
+    import app as A
+    from core import yz
+    importlib.reload(A)
+    A._tara(SqliteKaynak(_yillik_firmalar(tmp_path)), "yillik.bak")
+    c = A.app.test_client()
+    assert 'type="checkbox" class="firma-sec" name="firma" value="010"' in c.get("/firmalar").get_data(as_text=True)
+    # seçilen firmalardan birinin dönemi yoksa reddedilir
+    r = c.post("/aktar", data={"firma": ["010", "011"], "donem_010": ["01"]}).get_data(as_text=True)
+    assert "Firma 011 için en az bir dönem" in r
+    c.post("/aktar", data={"firma": ["010", "011"], "donem_010": ["01"], "donem_011": ["01"], "sadece_faturali": "1"})
+    for _ in range(600):
+        d = c.get("/durum").json
+        if not d["calisiyor"]:
+            break
+        time.sleep(0.05)
+    assert d["hata"] is None, d
+    aid = d["sonraki"].rsplit("/", 1)[-1]
+    assert aid.endswith("_F010-011")
+    klasor = tmp_path / "calisma" / aid
+    bilgi = json.loads((klasor / "bilgi.json").read_text(encoding="utf-8"))
+    assert bilgi["firma"] == "010-011" and bilgi["donemler"] == ["010/01", "011/01"]
+    assert [f["no"] for f in bilgi["firmalar"]] == ["010", "011"] and "uyari" not in bilgi
+    p = c.get(d["sonraki"]).get_data(as_text=True)
+    assert "2 firma birleştirildi" in p and "DEMO YAPI 2025" in p
+    for tur in ("excel", "pdf", "powerbi"):
+        assert c.get(f"/indir/{aid}/{tur}").status_code == 200, tur
+    # yapay zekâya giden bağlamda iki yılın firma adı da gizli
+    a = Analiz(str(klasor / "analiz.sqlite"))
+    m = yz.Maske(a, bilgi["firma_ad"], True)
+    metin = m.gizle("DEMO YAPI 2025 ve DEMO YAPI 2026 karşılaştırması")
+    assert "DEMO YAPI" not in metin and "FİRMA" in metin

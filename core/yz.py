@@ -164,8 +164,11 @@ class Maske:
             ad = str(getattr(r, "temsilci_ad", "") or "").strip()
             if len(ad) >= 3 and ad not in self.ileri:
                 self.ileri[ad] = f"Temsilci-{i:02d}"
-        if firma_ad and len(firma_ad) >= 3:
-            self.ileri[firma_ad] = "FİRMA"
+        # birden çok firma (yıl yıl ayrı açılmış) birleştirildiyse hepsinin adı gizlenir
+        adlar = [firma_ad] + str(getattr(analiz, "meta", {}).get("firma_adlari") or "").split(" | ")
+        for ad in dict.fromkeys(a.strip() for a in adlar):
+            if len(ad) >= 3:
+                self.ileri.setdefault(ad, "FİRMA")
         self.geri = {v: k for k, v in self.ileri.items()}
         self._ileri_re = self._derle(self.ileri)
         self._geri_re = self._derle(self.geri)

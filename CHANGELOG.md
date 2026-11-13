@@ -6,6 +6,13 @@
   geri yükler ve tek kaynak gibi okur. Hangisinin firma verisi, hangisinin LOGODB olduğunu içeriğinden kendisi anlar,
   sıra önemli değildir. Firma adları (`L_CAPIFIRM`), dönem tarihleri (`L_CAPIPERIOD`) ve ambar adları (`L_CAPIWHOUSE`)
   LOGODB'den gelir.
+- **Yıl yıl ayrı açılmış firmalar tek analizde:** firma seçim ekranında birden fazla firma işaretlenebilir
+  (ör. 001 = 2024, 002 = 2025). Seçilen firmalar birleştirilir: müşteri ve malzemeler **koduna** göre eşleştirilir
+  (her firmada iç numaralar farklıdır), satış/alış/kâr tüm yıllardan toplanır, geçen yıla göre karşılaştırma yıllar
+  arasında çalışır, maliyet önceki yılın alışlarından devam eder. Stok ve cari bakiye en yeni firmanın son döneminden
+  alınır. Tarih aralıkları çakışırsa (çift sayım riski) ya da firmalar neredeyse hiç ortak cari kodu paylaşmıyorsa
+  (farklı şirket olabilir) panelde ve veri notlarında uyarı çıkar. Tek firma seçildiğinde sonuçlar değişmez.
+- Yapay zekâ anonimleştirmesi ve tanılama paketi birleştirilen tüm firmaların adlarını gizler.
 - Yalnızca LOGODB seçilirse program "firma verilerinin olduğu yedeği de ekleyin" der.
 - **Firma seçim ekranı:** çok firmalı yedeklerde arama kutusu; dönemlerin tarih aralığı; birden çok firma varsa hiçbiri
   önceden seçili gelmez, seçilen firma vurgulanır ve "sadece bu firmanın verileri analiz edilir" yazar. LOGODB'de tanımlı

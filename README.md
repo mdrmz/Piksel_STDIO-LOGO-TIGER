@@ -48,7 +48,9 @@ Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özel
    hangisinin hangisi olduğunu kendisi anlar. İlk seferde program kendi SQL Server'ını kurar
    (internet gerekir, ~5 dakika; Windows "yönetici izni" sorduğunda **Evet** deyin). Sonraki açılışlarda bu adım atlanır.
 4. **Firma ve dönem seçin.** Program yedekteki tüm Logo firmalarını ve dönemlerini kendisi bulur. Çok firmalı
-   yedeklerde arama kutusuyla firmayı bulun; her analiz tek bir firma içindir, firmalar birbirine karışmaz.
+   yedeklerde arama kutusuyla firmayı bulun. Tek firma seçerseniz yalnızca o firma analiz edilir.
+   Şirket Logo'da **her yıl ayrı firma** olarak açıldıysa o yılların firmalarını birlikte işaretleyin: tek analizde
+   birleşir, müşteri ve ürünler koduna göre eşleştirilir; stok ve cari bakiye en yeni yılın firmasından alınır.
    Başka bir firmayı da analiz edecekseniz *Sonra başka firmayı da analiz edeceğim* kutusunu işaretleyin (yedek yeniden açılmaz).
 5. **Raporu alın.** Panelde özet görünür; **Excel raporu** ya da **PDF özet** düğmesiyle indirin, **Power BI raporu aç** ile hazır raporu Power BI'da açın.
 

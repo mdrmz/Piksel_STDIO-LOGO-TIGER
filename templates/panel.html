@@ -5,6 +5,8 @@
   <div>
     <h1>{{ bilgi.firma }} · {{ bilgi.firma_ad or 'Firma' }}</h1>
     <div class="soluk">{{ o.tarih_bas }} – {{ o.tarih_bit }} · dönemler {{ bilgi.donemler|join(', ') }} · kaynak {{ bilgi.kaynak }}</div>
+    {% if bilgi.firmalar %}<div class="kucuk soluk" style="margin-top:4px">{{ bilgi.firmalar|length }} firma birleştirildi:
+      {% for f in bilgi.firmalar %}{{ f.no }} {{ f.ad }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a class="btn" href="/indir/{{ aid }}/excel">Excel raporu</a>
@@ -17,6 +19,7 @@
 </div>
 
 <div id="pbi-durum" class="uyari" style="margin-top:14px;display:none"></div>
+{% if bilgi.uyari %}<div class="uyari" style="margin-top:14px"><b>Dikkat:</b> {{ bilgi.uyari }}</div>{% endif %}
 <div class="izgara i4" style="margin-top:20px">
   <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.net_satis|tl }} ₺</div>
     <div class="kucuk soluk">iade {{ o.iade_tutar|tl }} ₺ · {{ o.iade_orani|yuzde }}</div></div>
