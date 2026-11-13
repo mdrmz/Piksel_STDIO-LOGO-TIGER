@@ -134,6 +134,20 @@ document.querySelectorAll('.sekme button').forEach(b => b.onclick = () => {
 document.querySelectorAll('input[name=sql_kaynak]').forEach(r => r.onchange = () => {
   document.getElementById('elle').style.display = document.querySelector('input[name=sql_kaynak]:checked').value === 'elle' ? '' : 'none';
 });
+// Yedek tarayıcıdan yüklenirken düğme kilitlenir: ikinci tıklama ya da sayfadan ayrılma yüklemeyi yarıda keser.
+document.getElementById('f-bak').addEventListener('submit', e => {
+  const f = e.target, btn = f.querySelector('button.btn');
+  const dosyalar = [...f.querySelectorAll('input[type=file]')].flatMap(i => [...i.files]);
+  if (btn.disabled) { e.preventDefault(); return; }
+  btn.disabled = true;
+  if (dosyalar.length) {
+    const mb = dosyalar.reduce((t, d) => t + d.size, 0) / 1024 / 1024;
+    btn.textContent = `Yedek yükleniyor (${mb.toLocaleString('tr-TR', {maximumFractionDigits: 0})} MB)… sayfayı kapatmayın`;
+  } else {
+    btn.textContent = 'Başlatılıyor…';
+  }
+});
+window.addEventListener('pageshow', () => { const b = document.querySelector('#f-bak button.btn'); b.disabled = false; b.textContent = 'Başlat'; });
 document.querySelectorAll('a.ornek').forEach(a => a.onclick = e => { e.preventDefault(); document.getElementById('sunucu').value = a.dataset.s; });
 </script>
 {% endblock %}

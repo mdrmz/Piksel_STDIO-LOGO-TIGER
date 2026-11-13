@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## v0.6.1 — 2026-11-13
+- Yedek tarayıcıdan yüklenirken yarıda kesilirse (dosya seçildikten sonra değişti/kilitlendi, USB/ağ sürücüsü
+  okunamadı, sayfa yenilendi) artık boş "Bad Request" sayfası yerine nedenini ve çözümünü anlatan bir hata sayfası
+  çıkar: dosyanın tam yolunu yazmak. Olay tanılama günlüğüne de yazılır.
+- Ana ekranda Başlat'a basılınca düğme kilitlenir ve "Yedek yükleniyor (… MB)" yazar; ikinci tıklama yüklemeyi kesmez.
+
 ## v0.6.0 — 2026-11-13
 - **İki yedek birlikte:** Logo'nun firma tanımlarını ayrı bir sistem veritabanında (`LOGODB`) tuttuğu kurulumlarda
   firmadan iki `.bak` gelir. Ana ekranda **İkinci yedek var mı?** alanından ikisi birlikte seçilir; program ikisini de

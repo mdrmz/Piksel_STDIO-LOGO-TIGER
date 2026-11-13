@@ -217,6 +217,16 @@ def kaynak_ac():
         def is_():
             IS.yaz("Demo veritabanı açılıyor…")
             _tara(SqliteKaynak(DEMO_DB), "Demo veritabanı")
+    elif tur is None and (request.content_length or 0) > 0:
+        # Form gövdesi okunamadı: tarayıcı yüklemeyi yarıda kesti (dosya seçildikten sonra değişti/kilitlendi,
+        # USB/ağ sürücüsü koptu, sayfa yenilendi…). Werkzeug bu durumda formu sessizce boş bırakır.
+        tanilama.yaz(f"Yükleme yarıda kesildi (Content-Length {request.content_length:,} bayt)")
+        return render_template("hata.html", tanilama=True, mesaj=(
+            "Yedek dosyası tarayıcıdan programa yüklenirken yarıda kesildi. Genelde dosya seçildikten sonra "
+            "değiştiğinde (hâlâ kopyalanıyor, başka bir program açık tutuyor), USB/ağ sürücüsünden okunamadığında "
+            "ya da yükleme sürerken sayfa yenilendiğinde olur. Çözüm: dosyayı seçmek yerine "
+            "\"…ya da dosyanın tam yolu\" kutusuna tam yolunu yazın (ör. C:\\Yedekler\\TIGER.bak). "
+            "Dosya USB'de ya da ağdaysa önce bilgisayara kopyalayın.")), 400
     else:
         abort(400)
 
