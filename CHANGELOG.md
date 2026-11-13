@@ -1,5 +1,13 @@
 # Değişiklik günlüğü
 
+## v0.6.3 — 2026-11-13
+- **C: dolu, başka disk boşsa kendiliğinden oraya geçer.** Yedeğin SQL Server için kopyası ve geri yüklenen
+  geçici veritabanı, C: sürücüsünde yer yetmiyorsa yeterli boş alanı olan diğer sabit diske
+  (`D:\LogoAnalizVeri\yedek` ve `D:\LogoAnalizVeri\veri`) konur; SQL Server servisine o klasör için izin verilir.
+  Ayar gerekmez; iş bitince oradaki geçici dosyalar da silinir. Firmanın kendi yedek dosyasına dokunulmaz.
+- Kural: C: hem kopyayı hem açılmış veritabanını rahatça alıyorsa her şey eskisi gibi C:'de kalır; almıyorsa en boş
+  disk seçilir. Hiçbir diskte yer yoksa ne kadar yer açılması gerektiği söylenir.
+
 ## v0.6.2 — 2026-11-13
 Disk alanı: "No space left on device" (Errno 28) hatasına yol açan durumlar giderildi.
 - **Tarayıcıdan yüklenen yedek artık diskte bir kez yer kaplar.** Önce Windows'un geçici klasörüne, sonra programın

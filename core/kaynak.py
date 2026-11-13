@@ -249,6 +249,26 @@ def _bos_alan(yol):
         return None
 
 
+ALT_KLASOR = "LogoAnalizVeri"  # C: dolduğunda başka sürücüde kullanılan klasör: <sürücü>:\\LogoAnalizVeri\\{yedek,veri}
+_PAY = 1024 ** 3  # sürücüyü ağzına kadar doldurmamak için bırakılan pay
+
+
+def _yerel_suruculer() -> list[str]:
+    """Windows'ta bu bilgisayarın sabit diskleri (C:\\, D:\\ …); diğer sistemlerde boş liste."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    import string
+    k32 = ctypes.windll.kernel32
+    maske = k32.GetLogicalDrives()
+    return [f"{h}:\\" for i, h in enumerate(string.ascii_uppercase)
+            if maske >> i & 1 and k32.GetDriveTypeW(f"{h}:\\") == 3]  # 3 = DRIVE_FIXED
+
+
+def _surucu(yol: str) -> str:
+    return os.path.splitdrive(os.path.abspath(yol))[0].upper() or "/"
+
+
 def _yer_kontrolu(dosyalar, veri_kl, log_kl):
     """Geri yüklenecek veritabanının diske sığıp sığmadığını baştan söyler (SQL Server aynı bilgisayardaysa).
     Sıkıştırılmış yedekler açılınca .bak dosyasından kat kat büyük olabilir."""
@@ -356,15 +376,80 @@ class BakKaynak(MssqlKaynak):
                 self._ilerleme(f"Önceki yarım kalmış denemeden kalan geçici veritabanı silindi ({ad}).")
             except Exception:
                 pass
-        if yedek_klasoru and os.path.isdir(yedek_klasoru):
-            for dosya in os.listdir(yedek_klasoru):
+        klasorler = [yedek_klasoru] + [os.path.join(k, ALT_KLASOR, "yedek") for k in _yerel_suruculer()]
+        for klasor in klasorler:
+            if not klasor or not os.path.isdir(klasor):
+                continue
+            for dosya in os.listdir(klasor):
                 kok = os.path.splitext(dosya)[0]
                 if dosya.lower().endswith(".bak") and _GECICI_AD.fullmatch(kok) and kok not in _ACIK:
                     try:
-                        os.remove(os.path.join(yedek_klasoru, dosya))
+                        os.remove(os.path.join(klasor, dosya))
                         self._ilerleme(f"Önceki denemeden kalan yedek kopyası silindi ({dosya}).")
                     except OSError:
                         pass
+
+    def _servis_hesabi(self):
+        """SQL Server servisinin Windows hesabı (ör. NT Service\\MSSQL$LOGOANALIZ); bulunamazsa None."""
+        if not hasattr(self, "_hesap"):
+            try:
+                r = self._sorgu_m("SELECT service_account FROM sys.dm_server_services "
+                                  "WHERE servicename LIKE 'SQL Server (%'")
+                self._hesap = (r[0]["service_account"] or None) if r else None
+            except Exception:
+                self._hesap = None
+        return self._hesap
+
+    def _klasor_ac(self, yol) -> bool:
+        """Başka sürücüde klasör açar ve SQL Server servisine yazma izni verir. Olmazsa False."""
+        try:
+            os.makedirs(yol, exist_ok=True)
+        except OSError:
+            return False
+        if os.name == "nt":
+            import subprocess
+            hesap = self._servis_hesabi()
+            kim = f"{hesap}:(OI)(CI)F" if hesap else "*S-1-1-0:(OI)(CI)M"  # bulunamazsa kurulumdaki gibi Everyone
+            try:
+                r = subprocess.run(["icacls", yol, "/grant", kim], capture_output=True,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=60)
+                if r.returncode != 0 and hesap:
+                    r = subprocess.run(["icacls", yol, "/grant", "*S-1-1-0:(OI)(CI)M"], capture_output=True,
+                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=60)
+                return r.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                return False
+        return True
+
+    def _diger_suruculer(self, alt, gerekli, haric=()):
+        """Yeterli boş alanı olan diğer sabit disklerde <sürücü>:\\LogoAnalizVeri\\<alt> klasörleri (en boşu önce)."""
+        adaylar = []
+        for kok in _yerel_suruculer():
+            if _surucu(kok) in haric:
+                continue
+            bos = _bos_alan(kok)
+            if bos is not None and bos >= gerekli + _PAY:
+                adaylar.append((bos, os.path.join(kok, ALT_KLASOR, alt)))
+        return [k for _, k in sorted(adaylar, reverse=True)]
+
+    def _hedef_klasorler(self, dosyalar, veri_kl, log_kl):
+        """Veritabanı varsayılan klasöre (genelde C:) sığmıyorsa yeterli yeri olan başka bir sürücüye açılır."""
+        try:
+            _yer_kontrolu(dosyalar, veri_kl, log_kl)
+            return veri_kl, log_kl
+        except KaynakHatasi as ilk:
+            gerekli = 0
+            for f in dosyalar:
+                try:
+                    gerekli += int(f.get("Size") or 0)
+                except (TypeError, ValueError):
+                    pass
+            for klasor in self._diger_suruculer("veri", gerekli, haric={_surucu(veri_kl)}):
+                if self._klasor_ac(klasor):
+                    self._ilerleme(f"{_surucu(veri_kl)} sürücüsünde yer yok; veritabanı {klasor} klasörüne açılıyor "
+                                   f"({_gb(gerekli)}). İş bitince silinir.")
+                    return klasor, klasor
+            raise ilk
 
     def _yarim_kalani_sil(self):
         """Geri yükleme yarıda kalırsa geçici veritabanını ve kopyayı hemen siler (disk dolu kalmasın)."""
@@ -400,9 +485,17 @@ class BakKaynak(MssqlKaynak):
                 ortak = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "LogoAnaliz", "yedek")
                 adaylar.append((ortak, ortak))
         ad = f"{self.gecici_db}.bak"
+        boyut = os.path.getsize(bak_yolu)
+        if _yerel_suruculer() and all(y == st for y, st in adaylar):  # Windows ve SQL Server dosyayı aynı yoldan görüyor (Docker değil)
+            # Varsayılan klasör (C:) hem kopyayı hem açılacak veritabanını rahat almıyorsa en boş diğer sürücü önce
+            mevcut = {_surucu(y) for y, _ in adaylar}
+            diger = [(k, k) for k in self._diger_suruculer("yedek", boyut, haric=mevcut)]
+            rahat = [a for a in adaylar if os.path.isdir(a[0]) and (_bos_alan(a[0]) or 0) >= 3 * boyut + _PAY]
+            adaylar = rahat + diger + [a for a in adaylar if a not in rahat]
         for yerel, sunucu_tarafi in adaylar:
             if not os.path.isdir(yerel):
-                continue
+                if os.path.basename(os.path.dirname(yerel)) != ALT_KLASOR or not self._klasor_ac(yerel):
+                    continue
             hedef = os.path.join(yerel, ad)
             if tasi:
                 try:
@@ -412,9 +505,8 @@ class BakKaynak(MssqlKaynak):
                     return sunucu_tarafi.rstrip("/\\") + ayrac + ad
                 except OSError:
                     pass  # farklı sürücü ya da izin yok: kopyalamayı dene
-            gerekli = os.path.getsize(bak_yolu)
             bos = _bos_alan(yerel)
-            if bos is not None and bos < gerekli:
+            if bos is not None and bos < boyut + _PAY:
                 continue  # sığmıyor; sıradaki klasörü dene (yoksa dosya yerinden okunur)
             try:
                 self._ilerleme("Yedek dosyası SQL Server'ın okuyabileceği klasöre kopyalanıyor…")
@@ -442,7 +534,7 @@ class BakKaynak(MssqlKaynak):
         r = self._sorgu_m("SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(4000)) AS d, "
                           "CAST(SERVERPROPERTY('InstanceDefaultLogPath') AS nvarchar(4000)) AS l")
         veri_kl, log_kl = r[0]["d"], r[0]["l"]
-        _yer_kontrolu(dosyalar, veri_kl, log_kl)
+        veri_kl, log_kl = self._hedef_klasorler(dosyalar, veri_kl, log_kl)
         ayrac = "\\" if "\\" in (veri_kl or "") else "/"
         moves, params = [], []
         for i, f in enumerate(dosyalar):

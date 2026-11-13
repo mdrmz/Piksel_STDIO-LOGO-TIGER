@@ -970,3 +970,42 @@ def test_yarida_kesilen_yukleme_temizlenir(tmp_path, monkeypatch):
                                  content_type=f"multipart/form-data; boundary={b}")
     assert r.status_code == 400 and "yarıda kesildi" in r.get_data(as_text=True)
     assert os.listdir(A.YUKLEME) == []
+
+
+def test_c_dolunca_baska_surucu_kullanilir(tmp_path, monkeypatch):
+    """C: dolu, D: boşsa yedeğin kopyası ve açılan veritabanı D:\\LogoAnalizVeri altına konur."""
+    from core import kaynak
+    C, D = tmp_path / "C", tmp_path / "D"
+    (C / "ProgramData" / "yedek").mkdir(parents=True)
+    (C / "DATA").mkdir()
+    (D / "Yedekler").mkdir(parents=True)
+    bak = D / "Yedekler" / "TIGER.bak"
+    bak.write_bytes(b"x" * 1000)
+    GB = 1024 ** 3
+    bos = {"C": GB + 2000, "D": 40 * GB}   # C: 1000 baytlık kopyayı alır ama kopya + veritabanını rahat almaz
+    monkeypatch.setattr(kaynak, "_yerel_suruculer", lambda: [str(C), str(D)])
+    monkeypatch.setattr(kaynak, "_surucu", lambda y: "D" if str(y).startswith(str(D)) else "C")
+    monkeypatch.setattr(kaynak, "_bos_alan", lambda y: bos[kaynak._surucu(y)])
+    b = _bak_kaynak_yalin(tmp_path)
+    acilan = []
+    b._klasor_ac = lambda y: acilan.append(y) or os.makedirs(y, exist_ok=True) or True
+
+    # kopya: C:'de kopya + veritabanı için rahat yer yok -> D:
+    yol = b._dosyayi_hazirla(str(bak), str(C / "ProgramData" / "yedek"), None)
+    assert yol == str(D / "LogoAnalizVeri" / "yedek" / "LOGOANALIZ_ABCDEF12.bak") and os.path.exists(yol)
+    assert bak.exists()                                   # firmanın yedeğine dokunulmaz (kopyalanır)
+
+    # geri yükleme: 8 GB'lık veritabanı C:'ye sığmıyor -> D:\LogoAnalizVeri\veri
+    dosyalar = [{"Type": "D", "Size": 7 * GB}, {"Type": "L", "Size": GB}]
+    veri, log = b._hedef_klasorler(dosyalar, str(C / "DATA"), str(C / "DATA"))
+    assert veri == log == str(D / "LogoAnalizVeri" / "veri") and acilan[-1] == veri
+
+    # C:'de yer varsa her şey eskisi gibi C:'de
+    bos["C"] = 100 * GB
+    assert b._hedef_klasorler(dosyalar, str(C / "DATA"), str(C / "DATA")) == (str(C / "DATA"), str(C / "DATA"))
+    assert b._dosyayi_hazirla(str(bak), str(C / "ProgramData" / "yedek"), None).startswith(str(C))
+
+    # hiçbir yerde yer yoksa anlaşılır hata
+    bos.update(C=GB, D=GB)
+    with pytest.raises(kaynak.KaynakHatasi, match="yer yetmiyor"):
+        b._hedef_klasorler(dosyalar, str(C / "DATA"), str(C / "DATA"))

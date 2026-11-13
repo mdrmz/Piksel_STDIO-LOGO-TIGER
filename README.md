@@ -202,6 +202,7 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 | *Logo firma tabloları bulunamadı* | Yedek Logo Tiger/Go veritabanı değil. |
 | *…yalnızca Logo'nun sistem veritabanı (LOGODB)* | Sadece `LOGODB` yedeği seçilmiş. Firma verilerinin olduğu yedeği de **İkinci yedek** alanına ekleyin. |
 | Firma listesinde adlar boş | Firma adları ayrı `LOGODB` yedeğinde duruyor; o yedeği de ikinci yedek olarak ekleyin. |
+| *Diskte yer yetmiyor* / *No space left on device* | Yedeği açmak için yaklaşık `.bak` boyutunun 3–4 katı boş alan gerekir. C: doluysa program yeri olan diğer diski (ör. `D:\\LogoAnalizVeri`) kendisi kullanır. Yine yetmiyorsa mesajdaki kadar yer açın. Yedeği tarayıcıdan seçmek yerine **tam yolunu yazmak** bir kopyayı ortadan kaldırır. |
 | Port 5055 dolu | `LOGO_ANALIZ_PORT=5056` ortam değişkeniyle başka port kullanın. |
 
 Herhangi bir sorunda sayfanın altındaki **Tanılama paketi** bağlantısıyla bir zip indirip [Issues](../../issues)'a ekleyin.
