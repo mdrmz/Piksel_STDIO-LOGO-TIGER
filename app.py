@@ -493,8 +493,99 @@ def panel(aid):
         abc=[("Ürün", abc_ozet(u, "net_tutar")), ("Müşteri", abc_ozet(m, "net_tutar")), ("Tedarikçi", abc_ozet(t, "net_tutar"))],
         urun=u.head(15), musteri=m.head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
-        kaynak_acik=bool(DURUM["firmalar"]), yz_hazir=yz.hazir_mi(), yz_ayar=yz.ayar(),
+        kaynak_acik=bool(DURUM["firmalar"]), yz_hazir=yz.hazir_mi(), yz_ayar=yz.ayar(), fatura_var=_fatura_var(a),
         yorum_html=_kayitli_yorum(klasor), gecmis=[(g["soru"], yz.md_html(g["cevap"])) for g in GECMIS.get(aid, [])])
+
+
+# ---------------------------------------------------------------------------- faturalar ve tam ABC listesi
+SAYFA_BOYU = 100
+
+
+def _fatura_var(a):
+    from core import fatura
+    return fatura.var_mi(a.con)
+
+
+def _fatura_verisi(aid):
+    from core import fatura
+    klasor, bilgi, _ = _analiz_ac(aid)
+    return klasor, bilgi, fatura.veri(os.path.join(klasor, "analiz.sqlite"))
+
+
+@app.route("/faturalar/<aid>")
+def faturalar_sayfa(aid):
+    from core import fatura
+    klasor, bilgi, v = _fatura_verisi(aid)
+    if v is None:
+        return render_template("faturalar.html", aid=aid, bilgi=bilgi, v=None)
+    fl = fatura.Filtre.istekten(request.args)
+    f, urun_s = fatura.suz(v, fl)
+    try:
+        sayfa = max(1, int(request.args.get("sayfa", 1)))
+    except ValueError:
+        sayfa = 1
+    sayfa_say = max(1, -(-len(f) // SAYFA_BOYU))
+    sayfa = min(sayfa, sayfa_say)
+    args = request.args.to_dict(flat=False)
+
+    def url(**degis):
+        q = {k: v for k, v in args.items() if k not in degis}
+        for k, d in degis.items():
+            if d is not None:
+                q[k] = [d]
+        from urllib.parse import urlencode
+        return f"/faturalar/{aid}?" + urlencode(q, doseq=True)
+
+    def sirala_url(kolon):
+        yon = "artan" if fl.sirala == kolon and fl.yon == "azalan" else "azalan"
+        return url(sirala=kolon, yon=yon, sayfa=None)
+
+    return render_template("faturalar.html", aid=aid, bilgi=bilgi, v=v, fl=fl, tur_grup=fatura.TUR_GRUP,
+                           f=f.iloc[(sayfa - 1) * SAYFA_BOYU: sayfa * SAYFA_BOYU], o=fatura.ozet(f, urun_s),
+                           sayfa=sayfa, sayfa_say=sayfa_say, url=url, sirala_url=sirala_url, fark_esik=fatura.FARK_ESIK,
+                           excel_url=f"/faturalar/{aid}/excel?" + request.query_string.decode())
+
+
+@app.route("/faturalar/<aid>/excel")
+def faturalar_excel(aid):
+    from core import fatura
+    klasor, bilgi, v = _fatura_verisi(aid)
+    if v is None:
+        abort(404)
+    fl = fatura.Filtre.istekten(request.args)
+    f, _ = fatura.suz(v, fl)
+    yol = os.path.join(klasor, f"Faturalar_{re.sub(r'[^0-9A-Za-z-]', '', str(bilgi['firma']))}.xlsx")
+    fatura.excel_indir(v, f, yol, "Filtreli liste." if fl.aktif_mi() else "Tüm faturalar.")
+    return send_file(yol, as_attachment=True)
+
+
+@app.route("/fatura/<aid>")
+def fatura_sayfa(aid):
+    from core import fatura
+    klasor, bilgi, v = _fatura_verisi(aid)
+    if v is None:
+        abort(404)
+    try:
+        sonuc = fatura.detay(v, request.args.get("d", ""), int(request.args.get("r", "")))
+    except ValueError:
+        abort(404)
+    if sonuc is None:
+        abort(404)
+    bas, satirlar = sonuc
+    return render_template("fatura.html", aid=aid, bilgi=bilgi, f=bas, satirlar=satirlar, fark_esik=fatura.FARK_ESIK,
+                           geri=request.referrer if request.referrer and "/faturalar/" in request.referrer else f"/faturalar/{aid}")
+
+
+@app.route("/abc/<aid>/<tur>")
+def abc_liste(aid, tur):
+    if tur not in ("urun", "musteri", "tedarikci"):
+        abort(404)
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
+    esik = AbcEsik(bilgi.get("abc_a", 0.8), bilgi.get("abc_b", 0.95))
+    t = {"urun": a.urun_abc, "musteri": a.musteri_abc, "tedarikci": a.tedarikci_abc}[tur](esik=esik)
+    return render_template("abc.html", aid=aid, bilgi=bilgi, tur=tur, t=t, esik=esik, ozet=abc_ozet(t, "net_tutar"),
+                           ambar_secili=a.ambar_secili, ambar_secili_ad=a.ambar_secili_ad,
+                           fatura_var=_fatura_var(a))
 
 
 def _kayitli_yorum(klasor):
@@ -680,10 +771,21 @@ def _surum():
 @app.template_filter("tl")
 def tl(v, ondalik=0):
     try:
-        s = f"{float(v):,.{ondalik}f}"
+        x = float(v)
     except (TypeError, ValueError):
         return ""
+    if x != x:  # NaN (Logo'da boş alan)
+        return ""
+    s = f"{x:,.{ondalik}f}"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+@app.template_filter("abs")
+def mutlak(v):
+    try:
+        return abs(float(v))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @app.template_filter("yuzde")

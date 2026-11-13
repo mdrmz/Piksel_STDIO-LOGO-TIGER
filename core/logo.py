@@ -46,6 +46,16 @@ SATIS = {7: 1, 8: 1, 2: -1, 3: -1}
 ALIS = {1: 1, 6: -1}
 MALIYET_KAYNAGI = (1, 13, 14, 50)   # alış, üretimden giriş, devir, sayım fazlası: birim maliyet bu girişlerden alınır
 
+# INVOICE.TRCODE anlamları (fatura türleri)
+FATURA_TRCODE_AD = {
+    1: "Satınalma", 2: "Perakende satış iade", 3: "Toptan satış iade", 4: "Alınan hizmet", 5: "Alınan proforma",
+    6: "Satınalma iade", 7: "Perakende satış", 8: "Toptan satış", 9: "Verilen hizmet", 10: "Verilen proforma",
+    13: "Satınalma fiyat farkı", 14: "Satış fiyat farkı", 26: "Müstahsil makbuzu",
+}
+# STLINE.LINETYPE anlamları (fatura satır tipi)
+SATIR_TIPI_AD = {0: "Malzeme", 1: "Promosyon", 2: "İndirim", 3: "Masraf", 4: "Hizmet", 5: "Depozito",
+                 6: "Karma koli", 7: "Karma koli satırı", 8: "Sabit kıymet", 9: "Ek malzeme", 10: "Malzeme sınıfı"}
+
 # CLFLINE.TRCODE anlamları (cari hareketler)
 CARI_TRCODE_AD = {
     1: "Nakit tahsilat", 2: "Nakit ödeme", 3: "Borç dekontu", 4: "Alacak dekontu", 5: "Virman", 6: "Kur farkı",
@@ -196,13 +206,34 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
             if d[c].dtype == object or str(d[c].dtype).startswith("str"):
                 d[c] = d[c].fillna("").astype(str).str.strip().map(turkce_onar)
 
-    satirlar = []
+    satirlar, faturalar = [], []
     for p in donemler:
         say(f"{on}Dönem {p}: fatura başlıkları okunuyor…")
-        inv = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {"LOGICALREF": 0, "FICHENO": "", "CANCELLED": 0, "TRCODE": 0,
-                                                   "SALESMANREF": 0})
+        bas = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {
+            "LOGICALREF": 0, "FICHENO": "", "DOCODE": "", "DATE_": None, "TRCODE": 0, "CLIENTREF": 0,
+            "SOURCEINDEX": 0, "CANCELLED": 0, "GROSSTOTAL": np.nan, "TOTALDISCOUNTS": np.nan, "TOTALVAT": np.nan,
+            "NETTOTAL": np.nan, "SALESMANREF": 0, "GENEXP1": ""})
+        for c in ("FICHENO", "DOCODE", "GENEXP1"):
+            bas[c] = bas[c].fillna("").astype(str).str.strip().map(turkce_onar)
+        inv = bas[["LOGICALREF", "FICHENO", "CANCELLED", "TRCODE", "SALESMANREF"]].copy()
         inv.columns = ["invoiceref", "fatura_no", "fatura_iptal", "fatura_trcode", "fatura_temsilci"]
-        inv["fatura_no"] = inv["fatura_no"].map(turkce_onar)
+        # fatura listesi (Logo'daki haliyle; iptaller dahil): Logo'da bulmak için tablo + LOGICALREF saklanır
+        trc = pd.to_numeric(bas["TRCODE"], errors="coerce").fillna(0).astype(int)
+        faturalar.append(pd.DataFrame({
+            "donem": f"{f}/{p}" if coklu else p, "firma": f, "logo_donem": p,
+            "fatura_ref": pd.to_numeric(bas["LOGICALREF"], errors="coerce").fillna(0).astype("int64").values,
+            "fatura_no": bas["FICHENO"].values, "belge_no": bas["DOCODE"].values,
+            "tarih": pd.to_datetime(bas["DATE_"], errors="coerce").values, "trcode": trc.values,
+            "tur": trc.map(FATURA_TRCODE_AD).fillna("Diğer").values,
+            "cari_ref": pd.to_numeric(bas["CLIENTREF"], errors="coerce").fillna(0).astype("int64").values,
+            "ambar": pd.to_numeric(bas["SOURCEINDEX"], errors="coerce").fillna(0).astype(int).values,
+            "iptal": (pd.to_numeric(bas["CANCELLED"], errors="coerce").fillna(0).astype(int) == 1).values,
+            "logo_brut": pd.to_numeric(bas["GROSSTOTAL"], errors="coerce").values,
+            "logo_indirim": pd.to_numeric(bas["TOTALDISCOUNTS"], errors="coerce").values,
+            "logo_kdv": pd.to_numeric(bas["TOTALVAT"], errors="coerce").values,
+            "logo_net": pd.to_numeric(bas["NETTOTAL"], errors="coerce").values,
+            "temsilci_ref": pd.to_numeric(bas["SALESMANREF"], errors="coerce").fillna(0).astype("int64").values,
+            "aciklama": bas["GENEXP1"].values}))
         say(f"{on}Dönem {p}: stok hareket satırları okunuyor…")
         st = _oku(kaynak, f"LG_{f}_{p}_STLINE", {
             "LOGICALREF": 0, "STOCKREF": 0, "LINETYPE": 0, "TRCODE": 0, "IOCODE": 0, "DATE_": None,
@@ -210,6 +241,7 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
             "DISTDISC": 0.0, "VATMATRAH": np.nan, "LINENET": np.nan, "UINFO1": 1.0, "UINFO2": 1.0,
             "CANCELLED": 0, "SALESMANREF": 0})
         st["donem"] = f"{f}/{p}" if coklu else p
+        st["firma"], st["logo_donem"] = f, p
         st = st.merge(inv, how="left", left_on="INVOICEREF", right_on="invoiceref")
         satirlar.append(st)
         say(f"{on}Dönem {p}: {len(st):,} satır okundu.".replace(",", "."))
@@ -225,7 +257,6 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
     linetypes = [0, 4] if ayar.hizmetleri_dahil_et else [0]
     malzeme_disi = ~st["LINETYPE"].fillna(0).astype(int).isin(linetypes)
     k["malzeme_disi_satir"] = int((malzeme_disi & ~iptal).sum())
-    st = st[~iptal & ~malzeme_disi].copy()
 
     u1 = st["UINFO1"].replace(0, np.nan).fillna(1.0)
     u2 = st["UINFO2"].replace(0, np.nan).fillna(1.0)
@@ -234,6 +265,22 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
     st["net_tutar"] = st["VATMATRAH"].where(st["VATMATRAH"].notna(),
                                             st["LINENET"].where(st["LINENET"].notna(),
                                                                 st["TOTAL"].fillna(0) - st["DISTDISC"].fillna(0)))
+
+    # faturaya bağlı TÜM satırlar (analize alınmayanlar da, nedeniyle): fatura detayında Logo ile sağlama için
+    fs = st[pd.to_numeric(st["INVOICEREF"], errors="coerce").fillna(0) > 0]
+    tip = pd.to_numeric(fs["LINETYPE"], errors="coerce").fillna(0).astype(int)
+    trc = pd.to_numeric(fs["TRCODE"], errors="coerce").fillna(0).astype(int)
+    durum = np.select(
+        [iptal[fs.index], ~tip.isin(linetypes), ~trc.isin(list(SATIS) + list(ALIS))],
+        ["İptal", "Analiz dışı: " + tip.map(SATIR_TIPI_AD).fillna("Diğer") + " satırı",
+         "Analiz dışı: " + trc.map(TRCODE_AD).fillna("Diğer") + " hareketi"], "Analizde")
+    fatura_satir = pd.DataFrame({
+        "donem": fs["donem"].values, "fatura_ref": pd.to_numeric(fs["INVOICEREF"]).astype("int64").values,
+        "satir_ref": fs["LOGICALREF"].values, "satir_tipi": tip.map(SATIR_TIPI_AD).fillna("Diğer").values,
+        "trcode": trc.values, "malzeme_ref": pd.to_numeric(fs["STOCKREF"], errors="coerce").fillna(0).astype("int64").values,
+        "miktar": fs["miktar"].values, "birim_fiyat": fs["PRICE"].values, "net_tutar": fs["net_tutar"].values,
+        "ambar": pd.to_numeric(fs["SOURCEINDEX"], errors="coerce").fillna(0).astype(int).values, "durum": durum})
+    st = st[~iptal & ~malzeme_disi].copy()
     st["hareket"] = st["TRCODE"].map(TRCODE_AD).fillna("Diğer")
     # birim maliyet hesabı için giriş tutarı (devir fişlerinde VATMATRAH boş/0 olabilir -> TOTAL)
     st["_giris_tutar"] = st["net_tutar"].where(st["net_tutar"] > 0, st["TOTAL"].fillna(0))
@@ -243,13 +290,16 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
         st["SALESMANREF"] > 0, pd.to_numeric(st["fatura_temsilci"], errors="coerce").fillna(0).astype(int))
     st = st.rename(columns={"STOCKREF": "malzeme_ref", "CLIENTREF": "cari_ref", "TRCODE": "trcode",
                             "IOCODE": "iocode", "INVOICEREF": "invoiceref_", "SOURCEINDEX": "ambar",
-                            "SALESMANREF": "satis_temsilci_ref", "LOGICALREF": "satir_ref"})
+                            "SALESMANREF": "satis_temsilci_ref", "LOGICALREF": "satir_ref", "PRICE": "birim_fiyat"})
     st["faturali"] = st["invoiceref_"].fillna(0).astype(int) > 0
+    st["fatura_ref"] = pd.to_numeric(st["invoiceref_"], errors="coerce").fillna(0).astype("int64")
     if coklu:  # her yıl/firma fatura numarasını baştan başlatabilir: fatura sayısı karışmasın
         st["fatura_no"] = f + "/" + st["fatura_no"].fillna("").astype(str)
     # dönem başı devir fişi hariç gerçek hareketlerin tarih aralığı (firmalar arası çakışma kontrolü için)
     gercek = st.loc[(st["trcode"] != 14) & st["tarih"].notna(), "tarih"]
+    fatura = pd.concat(faturalar, ignore_index=True) if faturalar else pd.DataFrame()
     return {"firma": firma, "donemler": list(donemler), "cari": cari, "mal": mal, "st": st, "kalite": k,
+            "fatura": fatura, "fatura_satir": fatura_satir,
             "bas": gercek.min() if len(gercek) else pd.NaT, "bit": gercek.max() if len(gercek) else pd.NaT}
 
 
@@ -326,6 +376,8 @@ def aktar_coklu(kaynak, secimler: list[tuple[Firma, list[str]]], hedef_db: str, 
         for i, p in enumerate(parcalar):
             p["st"]["cari_ref"] = _cevir(p["st"]["cari_ref"], p["_harita"]["cari_ref"], i)
             p["st"]["malzeme_ref"] = _cevir(p["st"]["malzeme_ref"], p["_harita"]["malzeme_ref"], i)
+            p["fatura"]["cari_ref"] = _cevir(p["fatura"]["cari_ref"], p["_harita"]["cari_ref"], i)
+            p["fatura_satir"]["malzeme_ref"] = _cevir(p["fatura_satir"]["malzeme_ref"], p["_harita"]["malzeme_ref"], i)
         for onceki, sonraki in zip(parcalar, parcalar[1:]):
             a, b = onceki["firma"].no, sonraki["firma"].no
             if pd.notna(onceki["bit"]) and pd.notna(sonraki["bas"]) and onceki["bit"] >= sonraki["bas"]:
@@ -346,7 +398,10 @@ def aktar_coklu(kaynak, secimler: list[tuple[Firma, list[str]]], hedef_db: str, 
 
     st = pd.concat([p["st"] for p in parcalar], ignore_index=True)
     hareket = st[["satir_ref", "donem", "tarih", "trcode", "hareket", "iocode", "malzeme_ref", "cari_ref",
-                  "ambar", "faturali", "fatura_no", "miktar", "net_tutar", "satis_temsilci_ref"]].copy()
+                  "ambar", "faturali", "fatura_no", "miktar", "net_tutar", "satis_temsilci_ref",
+                  "fatura_ref", "birim_fiyat"]].copy()
+    dim_fatura = pd.concat([p["fatura"] for p in parcalar], ignore_index=True)
+    fatura_satir = pd.concat([p["fatura_satir"] for p in parcalar], ignore_index=True)
 
     # ---- satış ve alış
     def _fakt(harita, ad):
@@ -456,8 +511,12 @@ def aktar_coklu(kaynak, secimler: list[tuple[Firma, list[str]]], hedef_db: str, 
     for ad, df in {"dim_cari": cari, "dim_malzeme": mal, "dim_tarih": dim_tarih, "fact_hareket": hareket,
                    "fact_satis": satis, "fact_alis": alis, "stok_bakiye": stok, "stok_ambar": stok_ambar,
                    "malzeme_maliyet": malzeme_maliyet, "dim_ambar": dim_ambar, "dim_temsilci": dim_temsilci,
-                   "fact_cari_hareket": cari_hareket}.items():
+                   "fact_cari_hareket": cari_hareket, "dim_fatura": dim_fatura, "fatura_satir": fatura_satir}.items():
         df.to_sql(ad, con, if_exists="replace", index=False)
+    # fatura ekranı hızlı açılsın
+    con.execute("CREATE INDEX IF NOT EXISTS ix_fatura_satir ON fatura_satir (donem, fatura_ref)")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_fatura_satir_malzeme ON fatura_satir (malzeme_ref)")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_dim_fatura ON dim_fatura (donem, fatura_ref)")
     meta = pd.DataFrame([{"anahtar": k, "deger": str(v)} for k, v in kalite.items()])
     meta.to_sql("meta", con, if_exists="replace", index=False)
     con.commit()

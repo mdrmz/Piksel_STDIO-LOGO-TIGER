@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block baslik %}Faturalar — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% block icerik %}
+<style>
+  .filtre { display:grid; grid-template-columns:repeat(6,1fr); gap:10px 14px; align-items:end; }
+  .filtre label { margin:0 0 4px; } @media (max-width:1000px) { .filtre { grid-template-columns:repeat(2,1fr); } }
+  .turler { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13.5px; } .turler label { display:inline-flex; gap:5px; align-items:center; margin:0; color:var(--yazi); font-size:13.5px; }
+  input[type=date] { width:100%; padding:7px 9px; border:1px solid #CBD2DC; border-radius:6px; font:inherit; }
+  table.fat td, table.fat th { white-space:nowrap; } table.fat td.ad { white-space:normal; min-width:180px; }
+  table.fat tr:hover td { background:#F7F9FC; } th a { color:inherit; text-decoration:none; } th a:hover { color:var(--mavi); }
+  .fark { color:#B42318; font-weight:600; } .iptal td { color:#9AA1AC; text-decoration:line-through; } .iptal td.durum { text-decoration:none; }
+  .logo-ref { font:12px ui-monospace, Menlo, Consolas, monospace; color:var(--soluk); }
+  .sayfalar a, .sayfalar span { margin-right:6px; }
+</style>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>Faturalar</h1>
+    <div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }} · <a href="/panel/{{ aid }}">Panele dön</a></div>
+  </div>
+  {% if v %}<div style="display:flex;gap:8px"><a class="btn" href="{{ excel_url }}">Excel'e indir{% if fl.aktif_mi() %} (filtreli){% endif %}</a></div>{% endif %}
+</div>
+
+{% if not v %}
+<div class="uyari" style="margin-top:16px">Bu analiz programın önceki bir sürümüyle oluşturulmuş; fatura listesi yok.
+  Logo yedeğini yeniden seçip analizi baştan oluşturun.</div>
+{% else %}
+<form class="kart" method="get" style="margin-top:16px">
+  <div class="filtre">
+    <div><label>Başlangıç</label><input type="date" name="bas" value="{{ fl.bas }}"></div>
+    <div><label>Bitiş</label><input type="date" name="bit" value="{{ fl.bit }}"></div>
+    <div><label>Cari (kod ya da ad)</label><input type="text" name="cari" value="{{ fl.cari }}" placeholder="ör. 120.01 ya da ABC Ltd"></div>
+    <div><label>Ürün (kod ya da ad)</label><input type="text" name="urun" value="{{ fl.urun }}" placeholder="faturada geçen ürün"></div>
+    <div><label>Fatura / belge no</label><input type="text" name="no" value="{{ fl.no }}"></div>
+    <div><label>Ambar</label><select name="ambar"><option value="">Tümü</option>
+      {% for a in v.ambarlar %}<option value="{{ a.ambar }}" {{ 'selected' if fl.ambar == a.ambar }}>{{ a.ambar_ad }}</option>{% endfor %}</select></div>
+  </div>
+  <div style="display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
+    <div><label>Fatura türü</label><div class="turler">
+      {% for k, (ad, _) in tur_grup.items() %}<label><input type="checkbox" name="tur" value="{{ k }}" {{ 'checked' if k in fl.tur }}> {{ ad }}</label>{% endfor %}</div></div>
+    <div style="min-width:230px"><label>Durum</label><select name="durum">
+      {% for k, ad in [('tum','Tümü'),('gecerli','İptal olmayanlar'),('iptal','Sadece iptaller'),('fark','Logo toplamıyla farkı olanlar'),('disarida','Analize alınmayan satırı olanlar')] %}
+      <option value="{{ k }}" {{ 'selected' if fl.durum == k }}>{{ ad }}</option>{% endfor %}</select></div>
+    {% if fl.cari_kod %}<input type="hidden" name="cari_kod" value="{{ fl.cari_kod }}">{% endif %}
+    {% if fl.urun_kod %}<input type="hidden" name="urun_kod" value="{{ fl.urun_kod }}">{% endif %}
+    <input type="hidden" name="sirala" value="{{ fl.sirala }}"><input type="hidden" name="yon" value="{{ fl.yon }}">
+    <div style="margin-left:auto;display:flex;gap:8px"><button class="btn">Filtrele</button>
+      <a class="btn ikincil" href="/faturalar/{{ aid }}">Temizle</a></div>
+  </div>
+  {% if fl.cari_kod or fl.urun_kod %}<div class="kucuk" style="margin-top:10px">
+    {% if fl.urun_kod %}Ürün: <b>{{ fl.urun_kod }}</b> <a href="{{ url(urun_kod=None, sayfa=None) }}">✕ kaldır</a>{% endif %}
+    {% if fl.cari_kod %}{% if fl.urun_kod %} · {% endif %}Cari: <b>{{ fl.cari_kod }}</b> <a href="{{ url(cari_kod=None, sayfa=None) }}">✕ kaldır</a>{% endif %}
+  </div>{% endif %}
+</form>
+
+<div class="izgara i4" style="margin-top:16px">
+  <div class="kart kpi"><div class="ad">Fatura</div><div class="deger">{{ o.fatura|tl }}</div>
+    <div class="kucuk soluk">{{ o.iptal|tl }} iptal{% if o.fark %} · <span class="fark">{{ o.fark }} Logo'yla farklı</span>{% endif %}</div></div>
+  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.satis_net|tl(2) }} ₺</div>
+    <div class="kucuk soluk">satış {{ o.satis_brut|tl }} − iade {{ o.satis_iade|tl }}</div></div>
+  <div class="kart kpi"><div class="ad">Net alış (KDV hariç)</div><div class="deger">{{ o.alis_net|tl(2) }} ₺</div>
+    <div class="kucuk soluk">iadeler düşülmüş</div></div>
+  {% if o.urun %}
+  <div class="kart kpi" style="border-color:#BFD3F2;background:#F1F6FD"><div class="ad">Bu ürünün net satışı (KDV hariç)</div>
+    <div class="deger">{{ o.urun.satis_net|tl(2) }} ₺</div>
+    <div class="kucuk soluk">{{ o.urun.satis_miktar|tl(2) }} birim · {{ o.urun.satir }} satır · ABC'deki tutarla aynı olmalı</div></div>
+  {% else %}
+  <div class="kart kpi"><div class="ad">Logo genel toplam (KDV dahil)</div><div class="deger">{{ o.logo_net|tl(2) }} ₺</div>
+    <div class="kucuk soluk">iadeler eksi, iptaller hariç</div></div>
+  {% endif %}
+</div>
+<p class="kucuk soluk" style="margin:8px 2px 0">Tutar sütunu programın analizde kullandığı KDV hariç tutardır (satırların <code>VATMATRAH</code> toplamı).
+  <b>Fark</b>: Logo'nun fatura başlığındaki KDV hariç tutar (<code>NETTOTAL − TOTALVAT</code>) ile satırlar arasındaki fark; {{ fark_esik|tl }} ₺'yi aşınca kırmızı.
+  Faturaya tıklayınca satırları, Logo'da bulmak için tablo adı ve <code>LOGICALREF</code> ile açılır.</p>
+
+<div class="kart" style="padding:6px 10px;margin-top:10px;overflow-x:auto">
+<table class="fat">
+  {% macro th(kolon, ad, sag=False) %}<th class="{{ 's' if sag }}"><a href="{{ sirala_url(kolon) }}">{{ ad }}{% if fl.sirala == kolon %} {{ '▲' if fl.yon == 'artan' else '▼' }}{% endif %}</a></th>{% endmacro %}
+  <tr>{{ th('tarih','Tarih') }}{{ th('fatura_no','Fatura no') }}{{ th('tur','Tür') }}{{ th('cari_ad','Cari') }}{{ th('ambar_ad','Ambar') }}
+    <th class="s">Satır</th>{% if o.urun %}<th class="s">Bu ürün</th>{% endif %}{{ th('analiz_tutar','Fatura tutarı (KDV hariç)', True) }}{{ th('logo_net','Logo genel toplam', True) }}{{ th('fark','Fark', True) }}<th>Logo kaydı</th></tr>
+  {% for r in f.itertuples() %}
+  <tr class="{{ 'iptal' if r.iptal }}" style="cursor:pointer" onclick="location.href='/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}'">
+    <td>{{ r.tarih.strftime('%d.%m.%Y') if r.tarih == r.tarih else '' }}</td>
+    <td><a href="/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}">{{ r.fatura_no or '(no yok)' }}</a>{% if r.belge_no %}<div class="kucuk soluk">belge {{ r.belge_no }}</div>{% endif %}</td>
+    <td class="durum">{{ r.tur }}{% if r.iptal %} <span class="rozet rC">iptal</span>{% endif %}</td>
+    <td class="ad">{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td>
+    <td>{{ r.ambar_ad }}</td>
+    <td class="s">{{ r.satir_say }}{% if r.disarida_satir %}<div class="kucuk soluk" title="Analize alınmayan satır (iptal, indirim, transfer…)">{{ r.disarida_satir }} dışarıda</div>{% endif %}</td>
+    {% if o.urun %}<td class="s" style="background:#F1F6FD"><b>{{ r.urun_tutar|tl(2) }}</b><div class="kucuk soluk">{{ r.urun_miktar|tl(2) }} birim</div></td>{% endif %}
+    <td class="s">{{ r.analiz_tutar|tl(2) }}</td>
+    <td class="s">{{ r.logo_net|tl(2) }}</td>
+    <td class="s {{ 'fark' if r.fark|abs > fark_esik }}">{{ r.fark|tl(2) if r.fark|abs > fark_esik else '–' }}</td>
+    <td class="logo-ref">{{ r.logo_tablo }}<br>ref {{ r.fatura_ref }}</td>
+  </tr>
+  {% else %}<tr><td colspan="11" class="soluk">Filtreye uyan fatura yok.</td></tr>{% endfor %}
+</table>
+</div>
+{% if sayfa_say > 1 %}
+<div class="sayfalar kucuk" style="margin-top:12px">
+  {% if sayfa > 1 %}<a href="{{ url(sayfa=(sayfa - 1)|string) }}">‹ Önceki</a>{% endif %}
+  <span class="soluk">Sayfa {{ sayfa }} / {{ sayfa_say }} · sayfa başına 100 fatura</span>
+  {% if sayfa < sayfa_say %}<a href="{{ url(sayfa=(sayfa + 1)|string) }}">Sonraki ›</a>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

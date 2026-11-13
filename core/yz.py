@@ -323,6 +323,11 @@ def sql_calistir(depo, sql, maske: Maske, sinir=200) -> str:
         sayac[0] += 1
         return 1 if sayac[0] > 2000 else 0  # ~birkaç saniyelik sınır
     con.set_progress_handler(_durdur, 10000)
+    if maske.acik:
+        # Fatura açıklaması serbest metindir (kişi/firma adı içerebilir, takma ad listesinde olmayabilir):
+        # anonimleştirme açıkken yapay zekâ bu sütunu okuyamaz (takma adla seçilse de boş döner).
+        con.set_authorizer(lambda islem, a1, a2, *_: sqlite3.SQLITE_IGNORE
+                           if islem == sqlite3.SQLITE_READ and a1 == "dim_fatura" and a2 == "aciklama" else sqlite3.SQLITE_OK)
     try:
         df = pd.read_sql_query(sql, con)
     except Exception as e:

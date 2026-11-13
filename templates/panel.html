@@ -9,6 +9,7 @@
       {% for f in bilgi.firmalar %}{{ f.no }} {{ f.ad }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    {% if fatura_var %}<a class="btn" href="/faturalar/{{ aid }}{{ aq }}" title="Faturaları tek tek görün, filtreleyin, Logo ile sağlayın">Faturalar</a>{% endif %}
     <a class="btn" href="/indir/{{ aid }}/excel{{ aq }}">Excel raporu{% if ambar_secili is not none %} ({{ ambar_secili_ad }}){% endif %}</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/pdf{{ aq }}" title="Yönetime sunulacak tek sayfalık özet">PDF özet</a>
     <button class="btn ikincil" id="pbi-btn" title="Hazır raporu Power BI Desktop ile açar (Windows)">Power BI raporu aç</button>
@@ -111,7 +112,7 @@
 <div class="izgara i3">
   {% for ad, oz in abc %}
   <div class="kart">
-    <h3>{{ ad }}</h3>
+    <h3>{{ ad }} <a class="kucuk" style="font-weight:400;float:right" href="/abc/{{ aid }}/{{ {'Ürün':'urun','Müşteri':'musteri','Tedarikçi':'tedarikci'}[ad] }}{{ aq }}">Tüm liste ›</a></h3>
     <table>
       <tr><th>Sınıf</th><th class="s">Kalem</th><th class="s">Kalem payı</th><th class="s">Tutar payı</th></tr>
       {% for r in oz.itertuples() %}
@@ -122,16 +123,16 @@
   </div>
   {% endfor %}
 </div>
-<p class="kucuk soluk">A: tutarın ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı. Tüm liste Excel raporunda.</p>
+<p class="kucuk soluk">A: tutarın ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı. Tam listeler için <b>Tüm liste</b>{% if fatura_var %}; bir ürüne ya da müşteriye tıklayınca o tutarı oluşturan faturalar açılır{% endif %}.</p>
 
 <div class="izgara i2">
   <div>
     <h2>İlk 15 ürün</h2>
     <div class="kart" style="padding:8px 12px"><table>
-      <tr><th></th><th>Malzeme</th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
+      <tr><th></th><th>Malzeme <a class="kucuk" style="font-weight:400" href="/abc/{{ aid }}/urun{{ aq }}">tüm liste ›</a></th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
       {% for r in urun.itertuples() %}
       <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
-          <td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }} · {{ r.grup_kod }}</div></td>
+          <td>{% if fatura_var %}<a href="/faturalar/{{ aid }}?urun_kod={{ r.malzeme_kod|urlencode }}&tur=satis&tur=satis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu tutarı oluşturan faturalar">{{ r.malzeme_ad }}</a>{% else %}{{ r.malzeme_ad }}{% endif %}<div class="kucuk soluk">{{ r.malzeme_kod }} · {{ r.grup_kod }}</div></td>
           <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td></tr>
       {% endfor %}
     </table></div>
@@ -139,10 +140,10 @@
   <div>
     <h2>İlk 15 müşteri</h2>
     <div class="kart" style="padding:8px 12px"><table>
-      <tr><th></th><th>Müşteri</th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
+      <tr><th></th><th>Müşteri <a class="kucuk" style="font-weight:400" href="/abc/{{ aid }}/musteri{{ aq }}">tüm liste ›</a></th><th class="s">Net tutar</th><th class="s">Küm.</th></tr>
       {% for r in musteri.itertuples() %}
       <tr><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
-          <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }} · son alım {{ r.son_alim }}</div></td>
+          <td>{% if fatura_var %}<a href="/faturalar/{{ aid }}?cari_kod={{ r.cari_kod|urlencode }}&tur=satis&tur=satis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu müşterinin faturaları">{{ r.cari_ad }}</a>{% else %}{{ r.cari_ad }}{% endif %}<div class="kucuk soluk">{{ r.cari_kod }} · {{ r.sehir }} · son alım {{ r.son_alim }}</div></td>
           <td class="s">{{ r.net_tutar|tl }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td></tr>
       {% endfor %}
     </table></div>

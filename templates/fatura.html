@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block baslik %}Fatura {{ f.fatura_no }} — {{ bilgi.firma }}{% endblock %}
+{% block icerik %}
+<style>
+  .logo-ref { font:12.5px ui-monospace, Menlo, Consolas, monospace; } .fark { color:#B42318; font-weight:600; }
+  tr.disarida td { color:#8A8F98; } .bilgi td:first-child { color:var(--soluk); width:210px; }
+</style>
+<p class="kucuk"><a href="{{ geri }}">‹ Fatura listesine dön</a></p>
+<h1>{{ f.tur }} · {{ f.fatura_no or '(no yok)' }}{% if f.iptal %} <span class="rozet rC">İPTAL</span>{% endif %}</h1>
+<div class="soluk">{{ f.tarih.strftime('%d.%m.%Y') if f.tarih == f.tarih else '' }} · {{ f.cari_ad }} ({{ f.cari_kod }}) · {{ f.ambar_ad }}</div>
+
+<div class="izgara i2" style="margin-top:16px">
+  <div class="kart"><h3>Logo'da bulmak için</h3><table class="bilgi">
+    <tr><td>Tablo</td><td class="logo-ref">{{ f.logo_tablo }}</td></tr>
+    <tr><td>LOGICALREF</td><td class="logo-ref">{{ f.fatura_ref }}</td></tr>
+    <tr><td>Firma / dönem</td><td>{{ f.firma }} / {{ f.logo_donem }}</td></tr>
+    <tr><td>Fatura no (FICHENO)</td><td>{{ f.fatura_no }}</td></tr>
+    {% if f.belge_no %}<tr><td>Belge no (DOCODE)</td><td>{{ f.belge_no }}</td></tr>{% endif %}
+    <tr><td>Fatura türü (TRCODE)</td><td>{{ f.tur }} ({{ f.trcode }})</td></tr>
+    {% if f.aciklama %}<tr><td>Açıklama</td><td>{{ f.aciklama }}</td></tr>{% endif %}
+    <tr><td>Sorgu</td><td class="logo-ref kucuk">SELECT * FROM {{ f.logo_tablo }} WHERE LOGICALREF = {{ f.fatura_ref }}</td></tr>
+  </table></div>
+  <div class="kart"><h3>Tutarlar</h3><table class="bilgi">
+    <tr><td>Logo brüt (GROSSTOTAL)</td><td class="s">{{ f.logo_brut|tl(2) }}</td></tr>
+    <tr><td>Logo indirim (TOTALDISCOUNTS)</td><td class="s">{{ f.logo_indirim|tl(2) }}</td></tr>
+    <tr><td>Logo KDV hariç (NETTOTAL − TOTALVAT)</td><td class="s">{{ f.logo_matrah|tl(2) }}</td></tr>
+    <tr><td>Logo KDV (TOTALVAT)</td><td class="s">{{ f.logo_kdv|tl(2) }}</td></tr>
+    <tr><td>Logo genel toplam (NETTOTAL)</td><td class="s"><b>{{ f.logo_net|tl(2) }}</b></td></tr>
+    <tr><td>Analizde kullanılan (KDV hariç)</td><td class="s"><b>{{ f.analiz_tutar|tl(2) }}</b></td></tr>
+    <tr><td>Fark (Logo − satırlar)</td><td class="s {{ 'fark' if f.fark|abs > fark_esik }}">{{ f.fark|tl(2) }}</td></tr>
+  </table>
+  {% if f.iptal %}<p class="kucuk uyari" style="margin-top:10px">Fatura Logo'da iptal edilmiş; hiçbir analize katılmaz.</p>
+  {% elif f.fark|abs > fark_esik %}<p class="kucuk uyari" style="margin-top:10px">Logo'nun başlık tutarı ile satırların toplamı
+    farklı. Aşağıda durum sütununa bakın: iptal edilmiş ya da tipi farklı (indirim, masraf, hizmet…) satırlar nedeni olabilir.</p>{% endif %}
+  </div>
+</div>
+
+<h2>Satırlar <span class="soluk kucuk">({{ satirlar|length }})</span></h2>
+<div class="kart" style="padding:6px 10px;overflow-x:auto"><table>
+  <tr><th>Malzeme</th><th>Satır tipi</th><th class="s">Miktar</th><th class="s">Birim fiyat</th><th class="s" title="İndirimler düşülmüş, KDV hariç: tutar ÷ miktar">Net birim fiyat</th><th class="s">Tutar (KDV hariç)</th><th>Durum</th><th>Logo kaydı</th></tr>
+  {% for s in satirlar.itertuples() %}
+  <tr class="{{ '' if s.durum == 'Analizde' else 'disarida' }}">
+    <td>{{ s.malzeme_ad if s.malzeme_ad == s.malzeme_ad else '' }}<div class="kucuk soluk">{{ s.malzeme_kod if s.malzeme_kod == s.malzeme_kod else '' }}</div></td>
+    <td>{{ s.satir_tipi }}</td><td class="s">{{ s.miktar|tl(2) }}</td><td class="s">{{ s.birim_fiyat|tl(2) }}</td><td class="s">{{ s.net_birim_fiyat|tl(2) }}</td>
+    <td class="s">{{ s.net_tutar|tl(2) }}</td>
+    <td>{% if s.durum == 'Analizde' %}<span class="rozet rA">Analizde</span>{% else %}<span class="kucuk">{{ s.durum }}</span>{% endif %}</td>
+    <td class="logo-ref kucuk">LG_{{ f.firma }}_{{ f.logo_donem }}_STLINE · ref {{ s.satir_ref }}</td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="soluk">Bu faturaya bağlı stok satırı yok (ör. yalnızca hizmet ya da boş fatura).</td></tr>{% endfor %}
+</table></div>
+<p class="kucuk soluk">Miktar ana birime çevrilmiştir (koli → adet gibi). Birim fiyat Logo'daki satır fiyatıdır (<code>PRICE</code>, fatura biriminde);
+  net birim fiyat indirimler düşülmüş KDV hariç fiyattır (tutar ÷ ana birim miktarı).
+  Tutar: dip indirim/masraf dağıtılmış KDV hariç net (<code>VATMATRAH</code>).</p>
+{% endblock %}

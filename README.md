@@ -88,6 +88,7 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 
 | Analiz | İçerik |
 |---|---|
+| **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
 | **Ürün ABC** | Net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
 | **Müşteri ABC** | Net satış, fatura sayısı, son alım tarihi |
@@ -111,6 +112,7 @@ Kârlılık, alacak, temsilci ve depo analizleri yedekte ilgili Logo tabloları 
 
 - **Panel**: tarayıcıda özet, öne çıkanlar, grafikler, ilk 15 ürün/müşteri, ölü stok, kârlılık, alacak yaşlandırma,
   müşteri kaybı, sipariş önerisi, temsilci ve depo tabloları.
+- **Faturalar ekranı**: faturaları filtreleyin, tek tek açın, Logo ile sağlayın; ABC'de bir ürüne/müşteriye tıklayınca o tutarı oluşturan faturalar listelenir. Filtrelenmiş liste Excel'e iner.
 - **Excel raporu** (`.xlsx`): Özet, Ürün/Müşteri/Tedarikçi ABC (Pareto grafiğiyle), Aylık Trend, Grup Satış,
   Ölü Stok, Stok Devir, Ürün/Müşteri/Grup Kârlılık, Alacak/Borç Yaşlandırma, Temsilci, Müşteri Kaybı, Sipariş Önerisi,
   Depo sayfaları. Filtreli, dondurulmuş başlıklı, A4 yatay yazdırmaya hazır.
@@ -241,6 +243,7 @@ core/kaynak.py         .bak geri yükleme, SQL Server ve SQLite bağlantıları
 core/logo.py           firma/dönem tarama, Logo tablolarından temiz modele aktarım
 core/analiz.py         ABC, trend, ölü stok, stok devir, kârlılık, cari yaşlandırma, temsilci, müşteri kaybı, sipariş önerisi, depo
 core/rapor.py          Excel raporu ve Power BI paketi
+core/fatura.py         fatura listesi, filtreler, fatura detayı, Logo ile sağlama
 core/pdf_ozet.py       tek sayfalık PDF yönetici özeti
 core/powerbi.py        hazır Power BI raporu (.pbit): model, ölçüler ve rapor sayfaları
 core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap, yönetici yorumu

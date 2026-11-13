@@ -1,5 +1,24 @@
 # Değişiklik günlüğü
 
+## v0.7.0 — 2026-11-13
+Faturaları tek tek görme, filtreleme ve Logo ile sağlama.
+- **Faturalar ekranı** (panelde **Faturalar** düğmesi): yedekteki tüm faturalar (iptaller dahil) tek tek listelenir.
+  Filtreler: tarih aralığı, fatura türü (satış, satış iadesi, satınalma, iade, hizmet), cari, ürün, fatura/belge no,
+  ambar, durum (iptal, Logo toplamıyla farkı olan, analize alınmayan satırı olan). Sütun başlığına tıklayarak sıralama.
+  Üstte filtreye uyan faturaların toplamı (net satış, net alış, Logo genel toplam).
+- **Logo ile sağlama:** her faturada Logo'nun kendi başlık toplamları (`NETTOTAL`, `TOTALVAT`) ile programın satırlardan
+  hesapladığı KDV hariç tutar yan yana; fark varsa kırmızı. Her fatura ve satır, Logo'da bulunabilmesi için tablo adı
+  (`LG_001_01_INVOICE`, `LG_001_01_STLINE`) ve `LOGICALREF` ile verilir.
+- **Fatura detayı:** faturaya tıklayınca satırları açılır: ürün, miktar, birim fiyat, indirimli net birim fiyat, tutar.
+  Analize alınmayan satırlar nedeniyle birlikte gösterilir (iptal, indirim/masraf satırı, transfer…).
+- **ABC'den faturalara:** panelde ve yeni **tam ABC listesi** sayfalarında (ürün, müşteri, tedarikçi; arama ve sınıf
+  filtresi) bir ürüne ya da müşteriye tıklayınca o tutarı oluşturan faturalar açılır; ürünün faturalardaki toplamı
+  ABC'deki tutarla aynıdır (testlerde her kalem için doğrulanır).
+- **Excel:** filtrelenmiş fatura listesi ve satırları Excel'e iner; Excel raporuna **Faturalar** ve **Fatura Satırları**
+  sayfaları eklendi (filtreli başlıklar).
+- Anonimleştirme açıkken yapay zekâ fatura açıklaması sütununu (serbest metin) okuyamaz.
+- Önceki sürümlerle oluşturulmuş analizlerde fatura listesi yoktur; yedeği yeniden açıp analizi baştan oluşturun.
+
 ## v0.6.5 — 2026-11-13
 - **Düzeltme:** tarayıcıdan seçilen yedek v0.6.2'den beri SQL Server'ın klasörüne kopyalanmak yerine taşınıyordu.
   Windows aynı diskte taşınan dosyanın eski (kullanıcı klasörü) izinlerini koruduğu için SQL Server dosyayı

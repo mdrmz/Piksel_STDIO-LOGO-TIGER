@@ -13,6 +13,7 @@ import pandas as pd
 from .analiz import AbcEsik, Analiz, abc_ozet
 
 LACIVERT = "#1F3864"
+RAPOR_SATIR_SINIRI = 200_000   # Excel raporundaki fatura satırı sayfası (fazlası Faturalar ekranından indirilir)
 SINIF_RENK = {"A": "#C6EFCE", "B": "#FFEB9C", "C": "#F4CCCC"}
 
 BASLIK = {
@@ -332,6 +333,15 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
                                  "Satırlar ay, sütunlar ambar.", aa)
             for j in range(1, len(aa.columns)):
                 ws_aa.set_column(j, j, max(16, len(str(aa.columns[j])) + 2), f["para"])
+
+        # ---- Faturalar (Logo ile sağlama: her fatura, tablo adı ve LOGICALREF ile)
+        from . import fatura as fat
+        if fat.var_mi(a.con):
+            v = fat.yukle(a.con)
+            fl = fat.Filtre(ambar=a.ambar_secili)
+            fs, _ = fat.suz(v, fl)
+            fat.excel_sayfalari(wb, v, fs, f"{a.ambar_secili_ad} ambarı." if a.ambar_secili is not None else "",
+                                satir_siniri=RAPOR_SATIR_SINIRI)
 
         for sayfa in wb.worksheets():   # yazdırma: yatay, sayfa genişliğine sığdır
             sayfa.set_landscape()

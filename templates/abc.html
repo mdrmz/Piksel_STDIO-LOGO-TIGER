@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set ad = {'urun': 'Ürün', 'musteri': 'Müşteri', 'tedarikci': 'Tedarikçi'}[tur] %}
+{% block baslik %}{{ ad }} ABC — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% block icerik %}
+{% set aq = '&ambar=' ~ ambar_secili if ambar_secili is not none else '' %}
+{% set turq = '&tur=alis&tur=alis_iade' if tur == 'tedarikci' else '&tur=satis&tur=satis_iade' %}
+<style> table.abc tr:hover td { background:#F7F9FC; } .sinif-sec a { margin-right:6px; } </style>
+<p class="kucuk"><a href="/panel/{{ aid }}{{ '?ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">‹ Panele dön</a></p>
+<h1>{{ ad }} ABC analizi <span class="soluk" style="font-weight:400;font-size:16px">· {{ t|length }} {{ ad|lower }}{% if ambar_secili is not none %} · {{ ambar_secili_ad }}{% endif %}</span></h1>
+<p class="soluk kucuk">{{ 'Net alış' if tur == 'tedarikci' else 'Net satış' }} tutarına göre (KDV hariç, iadeler düşülmüş).
+  A: tutarın ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı.
+  {% if fatura_var %}<b>Faturalar</b>'a tıklayınca bu tutarı oluşturan faturalar tek tek açılır; Logo ile oradan sağlayabilirsiniz.{% endif %}</p>
+
+<div class="izgara i3" style="margin:12px 0">
+  {% for r in ozet.itertuples() %}
+  <div class="kart kpi"><div class="ad"><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span> sınıfı</div>
+    <div class="deger">{{ r.kalem_sayisi|tl }} <span class="kucuk soluk" style="font-weight:400">{{ ad|lower }} ({{ r.kalem_payi|yuzde }})</span></div>
+    <div class="kucuk soluk">{{ r.toplam|tl }} ₺ · tutarın {{ r.deger_payi|yuzde }}'i</div></div>
+  {% endfor %}
+</div>
+
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+  <input type="text" id="ara" placeholder="Kod ya da ad ara…" style="max-width:320px">
+  <span class="sinif-sec kucuk">Sınıf: <a href="#" data-s="">Tümü</a><a href="#" data-s="A">A</a><a href="#" data-s="B">B</a><a href="#" data-s="C">C</a></span>
+  <span class="kucuk soluk" id="sayac"></span>
+</div>
+<div class="kart" style="padding:6px 10px;overflow-x:auto"><table class="abc" id="tablo">
+  <tr><th class="s">Sıra</th><th></th>
+    {% if tur == 'urun' %}<th>Malzeme</th><th>Grup</th><th class="s">Net tutar</th><th class="s">Miktar</th>
+    {% elif tur == 'musteri' %}<th>Müşteri</th><th>Şehir</th><th class="s">Net tutar</th><th class="s">Fatura</th><th>Son alım</th>
+    {% else %}<th>Tedarikçi</th><th>Şehir</th><th class="s">Net tutar</th>{% endif %}
+    <th class="s">Pay</th><th class="s">Kümülatif</th>{% if fatura_var %}<th></th>{% endif %}</tr>
+  {% for r in t.itertuples() %}
+  {% set kod = r.malzeme_kod if tur == 'urun' else r.cari_kod %}
+  <tr data-s="{{ r.sinif }}" data-ara="{{ (kod ~ ' ' ~ (r.malzeme_ad if tur == 'urun' else r.cari_ad))|lower }}">
+    <td class="s soluk">{{ r.sira }}</td><td><span class="rozet r{{ r.sinif }}">{{ r.sinif }}</span></td>
+    {% if tur == 'urun' %}
+    <td>{{ r.malzeme_ad }}<div class="kucuk soluk">{{ r.malzeme_kod }}</div></td><td>{{ r.grup_kod }}</td>
+    <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.toplam_miktar|tl(2) }}</td>
+    {% elif tur == 'musteri' %}
+    <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td><td>{{ r.sehir }}</td>
+    <td class="s">{{ r.net_tutar|tl(2) }}</td><td class="s">{{ r.fatura_sayisi|tl }}</td><td>{{ r.son_alim }}</td>
+    {% else %}
+    <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td><td>{{ r.sehir }}</td><td class="s">{{ r.net_tutar|tl(2) }}</td>
+    {% endif %}
+    <td class="s">{{ r.pay|yuzde }}</td><td class="s">{{ r.kumulatif_pay|yuzde }}</td>
+    {% if fatura_var %}<td><a class="kucuk" href="/faturalar/{{ aid }}?{{ 'urun_kod' if tur == 'urun' else 'cari_kod' }}={{ kod|urlencode }}{{ turq }}{{ aq }}">Faturalar ›</a></td>{% endif %}
+  </tr>
+  {% endfor %}
+</table></div>
+<script>
+(() => {
+  const satirlar = [...document.querySelectorAll('#tablo tr[data-s]')], ara = document.getElementById('ara');
+  let sinif = '';
+  const tr = s => s.replace(/I/g, 'ı').replace(/İ/g, 'i').toLowerCase();
+  function suz() {
+    const q = tr(ara.value.trim()); let n = 0;
+    satirlar.forEach(r => { const g = (!sinif || r.dataset.s === sinif) && (!q || tr(r.dataset.ara).includes(q)); r.style.display = g ? '' : 'none'; n += g; });
+    document.getElementById('sayac').textContent = `${n.toLocaleString('tr-TR')} kayıt`;
+  }
+  ara.oninput = suz;
+  document.querySelectorAll('.sinif-sec a').forEach(a => a.onclick = e => { e.preventDefault(); sinif = a.dataset.s; suz(); });
+  suz();
+})();
+</script>
+{% endblock %}

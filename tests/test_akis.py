@@ -1103,3 +1103,143 @@ def test_tasinan_yedege_sql_okuma_izni_verilir(tmp_path, monkeypatch):
     b._sorgu_m = lambda sql, p=None: (_ for _ in ()).throw(hata) if sql.startswith("RESTORE FILELISTONLY") else []
     with pytest.raises(kaynak.KaynakHatasi, match="erişim engellendi.*tam yolunu"):
         b._geri_yukle(hedef)
+
+
+# ---------------------------------------------------------------------------- faturalar ekranı ve Logo ile sağlama
+@pytest.fixture(scope="module")
+def fatura_verisi(depo):
+    from core import fatura
+    return fatura.veri(depo)
+
+
+def _filtre(**kw):
+    from werkzeug.datastructures import MultiDict
+    from core import fatura
+    return fatura.Filtre.istekten(MultiDict([(k, x) for k, v in kw.items() for x in (v if isinstance(v, list) else [v])]))
+
+
+def test_fatura_listesi_ham_logo_ile_ayni(depo, fatura_verisi):
+    """Fatura listesi Logo'daki INVOICE tablosunun tamamıdır; toplamlar ham tablolardan düz SQL ile aynıdır."""
+    from core import fatura
+    ham = sqlite3.connect(DEMO)
+    n = sum(ham.execute(f"SELECT COUNT(*) FROM LG_001_{p}_INVOICE").fetchone()[0] for p in ("01", "02"))
+    iptal = sum(ham.execute(f"SELECT COUNT(*) FROM LG_001_{p}_INVOICE WHERE CANCELLED=1").fetchone()[0] for p in ("01", "02"))
+    f, _ = fatura.suz(fatura_verisi, fatura.Filtre())
+    o = fatura.ozet(f, None)
+    assert (o["fatura"], o["iptal"]) == (n, iptal)
+    assert o["satis_net"] == pytest.approx(Analiz(depo).ozet()["net_satis"], abs=0.01)
+    # Logo başlık toplamı (NETTOTAL − TOTALVAT) ile satırlar: demo veride fark yok
+    assert o["fark"] == 0
+    # bir faturanın Logo kaydı: tablo + LOGICALREF ham tabloda aynı fatura numarasını verir
+    r = f[~f["iptal"]].iloc[0]
+    assert ham.execute(f"SELECT FICHENO FROM {r.logo_tablo} WHERE LOGICALREF=?", (int(r.fatura_ref),)).fetchone()[0] == r.fatura_no
+
+
+def test_abc_tutarlari_faturalardan_saglanir(depo, fatura_verisi):
+    """ABC'deki her ürün/müşteri/tedarikçi tutarı, o filtrenin fatura ekranındaki toplamına eşittir."""
+    from core import fatura
+    a = Analiz(depo)
+    for r in a.urun_abc().head(40).itertuples():
+        f, us = fatura.suz(fatura_verisi, _filtre(urun_kod=r.malzeme_kod, tur=["satis", "satis_iade"]))
+        assert fatura.ozet(f, us)["urun"]["satis_net"] == pytest.approx(r.net_tutar, abs=0.01)
+        assert f["urun_tutar"].abs().sum() > 0
+    for r in a.musteri_abc().head(40).itertuples():
+        f, _ = fatura.suz(fatura_verisi, _filtre(cari_kod=r.cari_kod, tur=["satis", "satis_iade"]))
+        assert fatura.ozet(f, None)["satis_net"] == pytest.approx(r.net_tutar, abs=0.01)
+    for r in a.tedarikci_abc().itertuples():
+        f, _ = fatura.suz(fatura_verisi, _filtre(cari_kod=r.cari_kod, tur=["alis", "alis_iade"]))
+        assert fatura.ozet(f, None)["alis_net"] == pytest.approx(r.net_tutar, abs=0.01)
+
+
+def test_fatura_filtreleri(fatura_verisi):
+    from core import fatura
+    v = fatura_verisi
+    f, _ = fatura.suz(v, _filtre(bas="2025-03-01", bit="2025-03-31", tur="satis"))
+    assert len(f) and f["tarih"].min() >= pd.Timestamp("2025-03-01") and f["tarih"].max() < pd.Timestamp("2025-04-01")
+    assert set(f["trcode"]) <= {7, 8}
+    assert fatura.suz(v, _filtre(durum="iptal"))[0]["iptal"].all()
+    ornek = v.faturalar.iloc[5]
+    f, _ = fatura.suz(v, _filtre(no=ornek.fatura_no.lower()))
+    assert ornek.fatura_no in set(f["fatura_no"])
+    f, _ = fatura.suz(v, _filtre(sirala="analiz_tutar", yon="artan"))
+    assert f["analiz_tutar"].is_monotonic_increasing
+    bas, satirlar = fatura.detay(v, str(ornek.donem), int(ornek.fatura_ref))
+    assert bas["fatura_no"] == ornek.fatura_no and len(satirlar) == ornek.satir_say
+    assert fatura.detay(v, "01", -5) is None
+
+
+def test_fatura_ekranlari(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import app as A
+    import openpyxl
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(600):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    p = c.get(f"/panel/{aid}").get_data(as_text=True)
+    assert f'href="/faturalar/{aid}"' in p and f"/abc/{aid}/urun" in p and "urun_kod=" in p
+    h = c.get(f"/faturalar/{aid}?tur=satis&sirala=analiz_tutar").get_data(as_text=True)
+    assert "LG_001_01_INVOICE" in h and "Net satış (KDV hariç)" in h and "Sonraki" in h
+    import re as _re
+    d, r = _re.search(r"/fatura/%s\?d=([^&]+)&r=(\d+)" % aid, h).groups()
+    h = c.get(f"/fatura/{aid}?d={d}&r={r}").get_data(as_text=True)
+    assert "LG_001_01_STLINE" in h and f"WHERE LOGICALREF = {r}" in h and "Net birim fiyat" in h
+    assert c.get(f"/fatura/{aid}?d=01&r=999999999").status_code == 404
+    for tur in ("urun", "musteri", "tedarikci"):
+        h = c.get(f"/abc/{aid}/{tur}").get_data(as_text=True)
+        assert "Faturalar ›" in h
+    kod = _re.search(r"urun_kod=([^&\"]+)", p).group(1)
+    assert "Bu ürünün net satışı" in c.get(f"/faturalar/{aid}?urun_kod={kod}&tur=satis&tur=satis_iade").get_data(as_text=True)
+    x = c.get(f"/faturalar/{aid}/excel?tur=satis_iade")
+    yol = tmp_path / "f.xlsx"
+    yol.write_bytes(x.data)
+    wb = openpyxl.load_workbook(yol, read_only=True)
+    assert wb.sheetnames == ["Faturalar", "Fatura Satırları"]
+    basliklar = [h.value for h in next(wb["Faturalar"].iter_rows(min_row=2, max_row=2))]
+    assert "Logo tablosu" in basliklar and "LOGICALREF" in basliklar
+    yol.write_bytes(c.get(f"/indir/{aid}/excel").data)
+    assert openpyxl.load_workbook(yol, read_only=True).sheetnames[-2:] == ["Faturalar", "Fatura Satırları"]
+
+
+def test_eski_analizde_fatura_ekrani_uyarir(depo, tmp_path, monkeypatch):
+    """dim_fatura tablosu olmayan (önceki sürümle oluşturulmuş) analiz: ekran çökmeyip yeniden oluşturmayı söyler."""
+    import importlib
+    import json
+    import shutil
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import app as A
+    importlib.reload(A)
+    kl = tmp_path / "20250101_000000_F001"
+    kl.mkdir()
+    shutil.copy(depo, kl / "analiz.sqlite")
+    con = sqlite3.connect(kl / "analiz.sqlite")
+    con.execute("DROP TABLE dim_fatura"); con.execute("DROP TABLE fatura_satir"); con.commit(); con.close()
+    (kl / "bilgi.json").write_text(json.dumps({"firma": "001", "firma_ad": "X", "donemler": ["01"], "kaynak": "x",
+                                               "tarih_bas": "", "tarih_bit": "", "olusturma": ""}), encoding="utf-8")
+    c = A.app.test_client()
+    assert "fatura listesi yok" in c.get("/faturalar/20250101_000000_F001").get_data(as_text=True)
+    assert 'href="/faturalar/' not in c.get("/panel/20250101_000000_F001").get_data(as_text=True)
+    assert c.get("/indir/20250101_000000_F001/excel").status_code == 200
+
+
+def test_yz_fatura_aciklamasini_okuyamaz(depo, tmp_path):
+    """Fatura açıklaması serbest metindir; anonimleştirme açıkken yapay zekâ sorgusu bu sütunu boş görür."""
+    import shutil
+    from core import yz
+    yol = str(tmp_path / "a.sqlite")
+    shutil.copy(depo, yol)
+    con = sqlite3.connect(yol)
+    con.execute("UPDATE dim_fatura SET aciklama='AHMET YILMAZ teslim aldı'"); con.commit(); con.close()
+    a = Analiz(yol)
+    for sql in ("SELECT aciklama FROM dim_fatura LIMIT 3", "SELECT aciklama AS x, fatura_no FROM dim_fatura LIMIT 3"):
+        assert "AHMET" not in yz.sql_calistir(yol, sql, yz.Maske(a, "DEMO", True))
+    assert "AHMET" in yz.sql_calistir(yol, "SELECT aciklama FROM dim_fatura LIMIT 3", yz.Maske(a, "DEMO", False))
