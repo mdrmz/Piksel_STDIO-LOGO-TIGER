@@ -269,27 +269,54 @@ def _surucu(yol: str) -> str:
     return os.path.splitdrive(os.path.abspath(yol))[0].upper() or "/"
 
 
+def _olcum_yeri(klasor):
+    """Bir klasörün boş alanının ölçüleceği yer. Windows'ta sürücü kökü (C:\\): SQL Server'ın DATA klasörüne
+    normal kullanıcı erişemez, klasörün kendisi sorulursa ölçüm sessizce başarısız olur. Diğer sistemlerde klasörün
+    kendisi. Bu bilgisayardan görülemiyorsa (Docker, uzak sunucu) None."""
+    if not klasor:
+        return None
+    if os.name == "nt":
+        surucu = os.path.splitdrive(klasor)[0]
+        if len(surucu) != 2:  # "/var/opt/..." (Docker) ya da \\sunucu\\paylaşım
+            return None
+        kok = surucu + "\\"
+        return kok if os.path.exists(kok) else None
+    return klasor if os.path.isdir(klasor) else None
+
+
+def _toplam_boyut(dosyalar) -> int:
+    toplam = 0
+    for f in dosyalar:
+        try:
+            toplam += int(f.get("Size") or 0)
+        except (TypeError, ValueError):
+            pass
+    return toplam
+
+
 def _yer_kontrolu(dosyalar, veri_kl, log_kl):
     """Geri yüklenecek veritabanının diske sığıp sığmadığını baştan söyler (SQL Server aynı bilgisayardaysa).
     Sıkıştırılmış yedekler açılınca .bak dosyasından kat kat büyük olabilir."""
-    gerek: dict[str, list] = {}  # sürücü -> [örnek klasör, gereken bayt]
+    gerek: dict[str, list] = {}  # sürücü -> [ölçüm yeri, gereken bayt]
     for f in dosyalar:
-        klasor = log_kl if f.get("Type") == "L" else veri_kl
-        if not klasor or not os.path.isdir(klasor):
+        yer = _olcum_yeri(log_kl if f.get("Type") == "L" else veri_kl)
+        if yer is None:
             return  # Docker ya da uzak sunucu: diskini buradan göremeyiz
-        try:
-            boyut = int(f.get("Size") or 0)
-        except (TypeError, ValueError):
-            boyut = 0
-        surucu = os.path.splitdrive(os.path.abspath(klasor))[0] or "/"
-        gerek.setdefault(surucu, [klasor, 0])[1] += boyut
-    for surucu, (klasor, gerekli) in gerek.items():
-        bos = _bos_alan(klasor)
+        gerek.setdefault(_surucu(yer), [yer, 0])[1] += _toplam_boyut([f])
+    for surucu, (yer, gerekli) in gerek.items():
+        bos = _bos_alan(yer)
         if bos is not None and gerekli > bos:
-            raise KaynakHatasi(
-                f"Diskte yer yetmiyor: yedeğin açılmış hali {_gb(gerekli)} tutuyor, {surucu} sürücüsünde {_gb(bos)} boş. "
-                f"En az {_gb(gerekli - bos + 1024 ** 3)} yer açın (Geri Dönüşüm Kutusu, İndirilenler, eski yedekler) "
-                f"ve tekrar deneyin.")
+            raise KaynakHatasi(_yer_yok_mesaji(gerekli, surucu, bos))
+
+
+def _yer_yok_mesaji(gerekli, surucu, bos):
+    digerleri = [(k, _bos_alan(k)) for k in _yerel_suruculer() if _surucu(k) != surucu]
+    ek = ""
+    if digerleri:
+        ek = " Diğer diskler: " + ", ".join(f"{_surucu(k)} {_gb(b)} boş" for k, b in digerleri if b is not None) + "."
+    return (f"Diskte yer yetmiyor: yedeğin açılmış hali {_gb(gerekli)} tutuyor, {surucu} sürücüsünde {_gb(bos)} boş "
+            f"ve bunu alacak başka disk yok.{ek} En az {_gb(gerekli - bos + _PAY)} yer açın (Geri Dönüşüm Kutusu, "
+            f"İndirilenler, eski yedekler) ve tekrar deneyin.")
 
 
 class BakKaynak(MssqlKaynak):
@@ -432,18 +459,24 @@ class BakKaynak(MssqlKaynak):
                 adaylar.append((bos, os.path.join(kok, ALT_KLASOR, alt)))
         return [k for _, k in sorted(adaylar, reverse=True)]
 
+    def _restore(self, yol, dosyalar, veri_kl, log_kl):
+        ayrac = "\\" if "\\" in (veri_kl or "") else "/"
+        moves, params = [], []
+        for i, f in enumerate(dosyalar):
+            uzanti = ".ldf" if f["Type"] == "L" else (".mdf" if i == 0 else f".ndf{i}")
+            klasor = (log_kl if f["Type"] == "L" else veri_kl).rstrip("\\/")
+            moves.append("MOVE %s TO %s")
+            params += [f["LogicalName"], f"{klasor}{ayrac}{self.gecici_db}_{i}{uzanti}"]
+        self._sorgu_m(f"RESTORE DATABASE [{self.gecici_db}] FROM DISK = %s WITH {', '.join(moves)}, RECOVERY, STATS = 10",
+                      tuple([yol] + params))
+
     def _hedef_klasorler(self, dosyalar, veri_kl, log_kl):
         """Veritabanı varsayılan klasöre (genelde C:) sığmıyorsa yeterli yeri olan başka bir sürücüye açılır."""
         try:
             _yer_kontrolu(dosyalar, veri_kl, log_kl)
             return veri_kl, log_kl
         except KaynakHatasi as ilk:
-            gerekli = 0
-            for f in dosyalar:
-                try:
-                    gerekli += int(f.get("Size") or 0)
-                except (TypeError, ValueError):
-                    pass
+            gerekli = _toplam_boyut(dosyalar)
             for klasor in self._diger_suruculer("veri", gerekli, haric={_surucu(veri_kl)}):
                 if self._klasor_ac(klasor):
                     self._ilerleme(f"{_surucu(veri_kl)} sürücüsünde yer yok; veritabanı {klasor} klasörüne açılıyor "
@@ -535,20 +568,26 @@ class BakKaynak(MssqlKaynak):
                           "CAST(SERVERPROPERTY('InstanceDefaultLogPath') AS nvarchar(4000)) AS l")
         veri_kl, log_kl = r[0]["d"], r[0]["l"]
         veri_kl, log_kl = self._hedef_klasorler(dosyalar, veri_kl, log_kl)
-        ayrac = "\\" if "\\" in (veri_kl or "") else "/"
-        moves, params = [], []
-        for i, f in enumerate(dosyalar):
-            uzanti = ".ldf" if f["Type"] == "L" else (".mdf" if i == 0 else f".ndf{i}")
-            klasor = (log_kl if f["Type"] == "L" else veri_kl).rstrip("\\/")
-            moves.append("MOVE %s TO %s")
-            params += [f["LogicalName"], f"{klasor}{ayrac}{self.gecici_db}_{i}{uzanti}"]
         self._ilerleme(f"Yedek geçici veritabanına geri yükleniyor ({self.gecici_db})… Büyük yedeklerde birkaç dakika sürebilir.")
         t0 = time.time()
         try:
-            self._sorgu_m(f"RESTORE DATABASE [{self.gecici_db}] FROM DISK = %s WITH {', '.join(moves)}, RECOVERY, STATS = 10",
-                          tuple([yol] + params))
+            self._restore(yol, dosyalar, veri_kl, log_kl)
         except Exception as e:
-            raise KaynakHatasi(f"Geri yükleme başarısız: {str(e)[:400]}") from e
+            m = re.search(r"\b3257\b.*?volume '([^']*)'.*?requires (\d+) additional free bytes.*?only (\d+) bytes", str(e), re.S)
+            if not m:
+                raise KaynakHatasi(f"Geri yükleme başarısız: {str(e)[:400]}") from e
+            # Ön kontrol yeri ölçemediyse SQL Server'ın kendi hesabıyla başka diske geç ve bir kez daha dene
+            surucu, gerekli, bos = m.group(1).rstrip("\\/").upper(), int(m.group(2)), int(m.group(3))
+            self._sorgu_m(f"IF DB_ID('{self.gecici_db}') IS NOT NULL DROP DATABASE [{self.gecici_db}]")
+            klasor = next((k for k in self._diger_suruculer("veri", gerekli, haric={surucu}) if self._klasor_ac(k)), None)
+            if klasor is None:
+                raise KaynakHatasi(_yer_yok_mesaji(gerekli, surucu, bos)) from e
+            self._ilerleme(f"{surucu} sürücüsünde yer yok ({_gb(gerekli)} gerekiyor, {_gb(bos)} boş); veritabanı "
+                           f"{klasor} klasörüne açılıyor. İş bitince silinir.")
+            try:
+                self._restore(yol, dosyalar, klasor, klasor)
+            except Exception as e2:
+                raise KaynakHatasi(f"Geri yükleme başarısız ({klasor}): {str(e2)[:400]}") from e2
         self._ilerleme(f"Geri yükleme tamam ({time.time() - t0:.0f} sn).")
 
     def kapat(self):

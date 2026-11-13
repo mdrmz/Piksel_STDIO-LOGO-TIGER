@@ -1,5 +1,15 @@
 # Değişiklik günlüğü
 
+## v0.6.4 — 2026-11-13
+- **Düzeltme:** v0.6.3'teki "C: doluysa başka diske geç" kontrolü SQL Server'ın `DATA` klasörünün boş alanını
+  ölçmeye çalışıyordu. Bu klasöre normal kullanıcı erişemediği için ölçüm sessizce başarısız oluyor ve kontrol
+  atlanıyordu; geri yükleme SQL Server'ın 3257 "insufficient free space" hatasıyla düşüyordu. Boş alan artık sürücü
+  kökünden (`C:\`) ölçülür.
+- **Ek güvence:** SQL Server yine de 3257 hatası verirse program geçici veritabanını yeri olan diğer diske
+  (`D:\LogoAnalizVeri\veri`) açıp bir kez daha dener. Hiçbir diskte yer yoksa gereken alanı ve diğer disklerin boş
+  alanını söyler.
+- README'deki sorun giderme satırında yol düzeltildi.
+
 ## v0.6.3 — 2026-11-13
 - **C: dolu, başka disk boşsa kendiliğinden oraya geçer.** Yedeğin SQL Server için kopyası ve geri yüklenen
   geçici veritabanı, C: sürücüsünde yer yetmiyorsa yeterli boş alanı olan diğer sabit diske

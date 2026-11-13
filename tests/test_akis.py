@@ -1009,3 +1009,44 @@ def test_c_dolunca_baska_surucu_kullanilir(tmp_path, monkeypatch):
     bos.update(C=GB, D=GB)
     with pytest.raises(kaynak.KaynakHatasi, match="yer yetmiyor"):
         b._hedef_klasorler(dosyalar, str(C / "DATA"), str(C / "DATA"))
+
+
+def test_sql_yer_yok_hatasinda_baska_surucuye_gecer(tmp_path, monkeypatch):
+    """Ön kontrol yeri ölçemese de (SQL Server'ın DATA klasörüne erişim yok) SQL Server 3257 'yer yok' derse
+    veritabanı yeri olan diğer diske açılır ve bir kez daha denenir."""
+    from core import kaynak
+    GB = 1024 ** 3
+    monkeypatch.setattr(kaynak, "_yerel_suruculer", lambda: ["C:\\", "D:\\"])
+    monkeypatch.setattr(kaynak, "_surucu", lambda y: str(y)[:2].upper())
+    bos = {"C:": 10383212544, "D:": 35 * GB}
+    monkeypatch.setattr(kaynak, "_bos_alan", lambda y: bos[str(y)[:2].upper()])
+    sorgular = []
+    hata = Exception(3257, b"There is insufficient free space on disk volume 'C:\\' to create the database. The database "
+                           b"requires 22059548672 additional free bytes, while only 10383212544 bytes are available."
+                           b"DB-Lib error message 20018, severity 16:\nGeneral SQL Server error")
+
+    def sorgu(sql, p=None):
+        sorgular.append((sql, p))
+        if sql.startswith("RESTORE FILELISTONLY"):
+            return [{"LogicalName": "TIGER", "Type": "D", "Size": None}, {"LogicalName": "TIGER_log", "Type": "L", "Size": None}]
+        if "InstanceDefaultDataPath" in sql:
+            return [{"d": "C:\\Program Files\\Microsoft SQL Server\\MSSQL16.LOGOANALIZ\\MSSQL\\DATA\\", "l": "C:\\Program Files\\Microsoft SQL Server\\MSSQL16.LOGOANALIZ\\MSSQL\\DATA\\"}]
+        if sql.startswith("RESTORE DATABASE") and "C:\\" in p[2]:
+            raise hata
+        return []
+    b = _bak_kaynak_yalin(tmp_path)
+    b._sorgu_m = sorgu
+    acilan = []
+    b._klasor_ac = lambda y: acilan.append(y) or True
+    b._geri_yukle("D:\\LogoAnalizVeri\\yedek\\LOGOANALIZ_ABCDEF12.bak")
+    restore = [p for s, p in sorgular if s.startswith("RESTORE DATABASE")]
+    duz = lambda y: y.replace("/", "\\").replace("\\\\", "\\")  # noqa: E731  (testler Linux'ta da koşar)
+    assert len(restore) == 2 and duz(restore[1][2]) == "D:\\LogoAnalizVeri\\veri\\LOGOANALIZ_ABCDEF12_0.mdf"
+    assert duz(restore[1][4]) == "D:\\LogoAnalizVeri\\veri\\LOGOANALIZ_ABCDEF12_1.ldf"
+    assert [duz(a) for a in acilan] == ["D:\\LogoAnalizVeri\\veri"]
+
+    # D: de yetmiyorsa ne kadar yer gerektiği ve diskler söylenir
+    bos["D:"] = 5 * GB
+    sorgular.clear(); acilan.clear()
+    with pytest.raises(kaynak.KaynakHatasi, match=r"20,5 GB tutuyor, C: sürücüsünde 9,7 GB.*D: 5,0 GB boş"):
+        b._geri_yukle("D:\\x.bak")
