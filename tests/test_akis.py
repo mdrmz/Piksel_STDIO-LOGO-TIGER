@@ -1050,3 +1050,56 @@ def test_sql_yer_yok_hatasinda_baska_surucuye_gecer(tmp_path, monkeypatch):
     sorgular.clear(); acilan.clear()
     with pytest.raises(kaynak.KaynakHatasi, match=r"20,5 GB tutuyor, C: sürücüsünde 9,7 GB.*D: 5,0 GB boş"):
         b._geri_yukle("D:\\x.bak")
+
+
+def test_tasinan_yedege_sql_okuma_izni_verilir(tmp_path, monkeypatch):
+    """Tarayıcıdan yüklenip taşınan yedek kullanıcı klasörünün izinlerini taşır; SQL Server okuyamaz (error 5).
+    Taşımadan sonra izinler sıfırlanıp servise okuma izni verilir; yine de error 5 gelirse bir kez daha denenir."""
+    from core import kaynak
+    cagri = []
+    monkeypatch.setattr(kaynak, "_WINDOWS", True)
+    monkeypatch.setattr(kaynak, "_icacls", lambda *a: cagri.append(a) or True)
+    yukleme, yedek = tmp_path / "_yukleme", tmp_path / "yedek"
+    yukleme.mkdir(); yedek.mkdir()
+    bak = yukleme / "1_TIGER.bak"
+    bak.write_bytes(b"x" * 100)
+    b = _bak_kaynak_yalin(tmp_path)
+    b._sorgu_m = lambda sql, p=None: [{"service_account": "NT Service\\MSSQL$LOGOANALIZ"}] if "dm_server_services" in sql else []
+    hedef = str(yedek / "LOGOANALIZ_ABCDEF12.bak")
+    assert b._dosyayi_hazirla(str(bak), str(yedek), None, tasi=True).endswith("LOGOANALIZ_ABCDEF12.bak")
+    assert cagri == [(hedef, "/reset"), (hedef, "/grant", "NT Service\\MSSQL$LOGOANALIZ:R")]
+
+    # izin verilemezse taşıma geri alınır ve kopyalanır (kopya da izin alır)
+    cagri.clear()
+    os.replace(hedef, bak)
+    sonuc = iter([True, False, False, True, True, True])   # /reset, grant hesap ✗, grant Everyone ✗ -> geri al; kopyada izinler
+    monkeypatch.setattr(kaynak, "_icacls", lambda *a: cagri.append(a) or next(sonuc))
+    del b._hesap
+    b._dosyayi_hazirla(str(bak), str(yedek), None, tasi=True)
+    assert bak.exists() and os.path.exists(hedef) and len(cagri) == 5
+
+    # FILELISTONLY error 5 -> izin verip bir kez daha dene
+    monkeypatch.setattr(kaynak, "_icacls", lambda *a: True)
+    b._kopya = hedef
+    hata = Exception(3201, "Cannot open backup device 'C:\\ProgramData\\LogoAnaliz\\yedek\\LOGOANALIZ_D66332AA.bak'. "
+                           "Operating system error 5(Erişim engellendi.).DB-Lib error message 20018")
+    deneme = []
+
+    def sorgu(sql, p=None):
+        if sql.startswith("RESTORE FILELISTONLY"):
+            deneme.append(1)
+            if len(deneme) == 1:
+                raise hata
+            return [{"LogicalName": "T", "Type": "D", "Size": 1}]
+        if "InstanceDefaultDataPath" in sql:
+            return [{"d": str(tmp_path), "l": str(tmp_path)}]
+        return []
+    b._sorgu_m = sorgu
+    b._geri_yukle(hedef)
+    assert len(deneme) == 2
+
+    # izin işe yaramazsa "bozuk" değil, erişim sorunu olduğu söylenir
+    deneme.clear()
+    b._sorgu_m = lambda sql, p=None: (_ for _ in ()).throw(hata) if sql.startswith("RESTORE FILELISTONLY") else []
+    with pytest.raises(kaynak.KaynakHatasi, match="erişim engellendi.*tam yolunu"):
+        b._geri_yukle(hedef)

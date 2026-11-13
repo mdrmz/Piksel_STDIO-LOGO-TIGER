@@ -1,5 +1,14 @@
 # Değişiklik günlüğü
 
+## v0.6.5 — 2026-11-13
+- **Düzeltme:** tarayıcıdan seçilen yedek v0.6.2'den beri SQL Server'ın klasörüne kopyalanmak yerine taşınıyordu.
+  Windows aynı diskte taşınan dosyanın eski (kullanıcı klasörü) izinlerini koruduğu için SQL Server dosyayı
+  okuyamıyor, "Operating system error 5 (Erişim engellendi)" veriliyordu. Taşınan ve kopyalanan yedeğin izinleri
+  artık yeni klasörden yeniden alınır ve SQL Server servisine açıkça okuma izni verilir; izin verilemezse taşıma geri
+  alınıp kopyalanır.
+- Yine de erişim engellenirse izin düzeltilip bir kez daha denenir. Olmazsa "dosya bozuk olabilir" yerine erişim
+  sorunu olduğu ve ne yapılacağı söylenir.
+
 ## v0.6.4 — 2026-11-13
 - **Düzeltme:** v0.6.3'teki "C: doluysa başka diske geç" kontrolü SQL Server'ın `DATA` klasörünün boş alanını
   ölçmeye çalışıyordu. Bu klasöre normal kullanıcı erişemediği için ölçüm sessizce başarısız oluyor ve kontrol

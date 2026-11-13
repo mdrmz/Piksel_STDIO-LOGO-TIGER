@@ -265,6 +265,20 @@ def _yerel_suruculer() -> list[str]:
             if maske >> i & 1 and k32.GetDriveTypeW(f"{h}:\\") == 3]  # 3 = DRIVE_FIXED
 
 
+_WINDOWS = os.name == "nt"
+
+
+def _icacls(*args) -> bool:
+    """Windows izin aracı; başarılıysa True."""
+    import subprocess
+    try:
+        r = subprocess.run(["icacls", *args], capture_output=True, timeout=60,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _surucu(yol: str) -> str:
     return os.path.splitdrive(os.path.abspath(yol))[0].upper() or "/"
 
@@ -433,20 +447,21 @@ class BakKaynak(MssqlKaynak):
             os.makedirs(yol, exist_ok=True)
         except OSError:
             return False
-        if os.name == "nt":
-            import subprocess
-            hesap = self._servis_hesabi()
-            kim = f"{hesap}:(OI)(CI)F" if hesap else "*S-1-1-0:(OI)(CI)M"  # bulunamazsa kurulumdaki gibi Everyone
-            try:
-                r = subprocess.run(["icacls", yol, "/grant", kim], capture_output=True,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=60)
-                if r.returncode != 0 and hesap:
-                    r = subprocess.run(["icacls", yol, "/grant", "*S-1-1-0:(OI)(CI)M"], capture_output=True,
-                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=60)
-                return r.returncode == 0
-            except (OSError, subprocess.SubprocessError):
-                return False
-        return True
+        if not _WINDOWS:
+            return True
+        hesap = self._servis_hesabi()
+        return bool(hesap and _icacls(yol, "/grant", f"{hesap}:(OI)(CI)F")) or \
+            _icacls(yol, "/grant", "*S-1-1-0:(OI)(CI)M")  # bulunamazsa kurulumdaki gibi Everyone
+
+    def _okuma_izni_ver(self, dosya) -> bool:
+        """SQL Server servisinin dosyayı okuyabilmesini sağlar. Aynı diskte taşınan dosya eski klasörünün
+        (ör. kullanıcı klasörü) izinlerini korur ve servis onu okuyamaz (Operating system error 5); önce izinler
+        yeni klasörden yeniden alınır, sonra servise açıkça okuma izni verilir."""
+        if not _WINDOWS:
+            return True
+        _icacls(dosya, "/reset")
+        hesap = self._servis_hesabi()
+        return bool(hesap and _icacls(dosya, "/grant", f"{hesap}:R")) or _icacls(dosya, "/grant", "*S-1-1-0:R")
 
     def _diger_suruculer(self, alt, gerekli, haric=()):
         """Yeterli boş alanı olan diğer sabit disklerde <sürücü>:\\LogoAnalizVeri\\<alt> klasörleri (en boşu önce)."""
@@ -533,11 +548,17 @@ class BakKaynak(MssqlKaynak):
             if tasi:
                 try:
                     os.replace(bak_yolu, hedef)  # aynı sürücüde anında, ek alan gerektirmez
-                    self._kopya = hedef
-                    ayrac = "/" if sunucu_tarafi.startswith("/") else "\\"
-                    return sunucu_tarafi.rstrip("/\\") + ayrac + ad
                 except OSError:
                     pass  # farklı sürücü ya da izin yok: kopyalamayı dene
+                else:
+                    if self._okuma_izni_ver(hedef):
+                        self._kopya = hedef
+                        ayrac = "/" if sunucu_tarafi.startswith("/") else "\\"
+                        return sunucu_tarafi.rstrip("/\\") + ayrac + ad
+                    try:
+                        os.replace(hedef, bak_yolu)  # izin verilemedi: geri al, kopyalamayı dene
+                    except OSError:
+                        bak_yolu = hedef
             bos = _bos_alan(yerel)
             if bos is not None and bos < boyut + _PAY:
                 continue  # sığmıyor; sıradaki klasörü dene (yoksa dosya yerinden okunur)
@@ -553,6 +574,7 @@ class BakKaynak(MssqlKaynak):
                     self._ilerleme("Kopya için yer yok; yedek bulunduğu yerden okunacak.")
                 continue  # yazma izni yok ya da yer yok; sıradaki klasörü dene
             self._kopya = hedef
+            self._okuma_izni_ver(hedef)
             ayrac = "/" if sunucu_tarafi.startswith("/") else "\\"
             return sunucu_tarafi.rstrip("/\\") + ayrac + ad
         return os.path.abspath(bak_yolu)
@@ -560,8 +582,21 @@ class BakKaynak(MssqlKaynak):
     def _geri_yukle(self, yol):
         self._ilerleme("Yedeğin içeriği okunuyor (FILELISTONLY)…")
         try:
-            dosyalar = self._sorgu_m("RESTORE FILELISTONLY FROM DISK = %s", (yol,))
+            try:
+                dosyalar = self._sorgu_m("RESTORE FILELISTONLY FROM DISK = %s", (yol,))
+            except Exception as e:
+                # Erişim engellendi: izni düzeltip bir kez daha dene
+                if "error 5(" not in str(e) or not self._kopya or not self._okuma_izni_ver(self._kopya):
+                    raise
+                self._ilerleme("SQL Server dosyayı okuyamadı; okuma izni verilip tekrar deneniyor…")
+                dosyalar = self._sorgu_m("RESTORE FILELISTONLY FROM DISK = %s", (yol,))
         except Exception as e:
+            if "error 5(" in str(e):
+                raise KaynakHatasi(
+                    "SQL Server yedek dosyasını okuyamadı (Windows: erişim engellendi). Yedeği seçmek yerine "
+                    "\"…ya da dosyanın tam yolu\" kutusuna tam yolunu yazın; olmazsa dosyayı "
+                    f"{os.path.dirname(self._kopya or yol)} klasörüne kopyalayıp oradaki yolunu yazın. "
+                    f"Ayrıntı: {str(e)[:300]}") from e
             raise KaynakHatasi(f"Yedek okunamadı. Dosya bozuk, şifreli ya da daha yeni bir SQL Server sürümüyle "
                                f"alınmış olabilir. Ayrıntı: {str(e)[:400]}") from e
         r = self._sorgu_m("SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(4000)) AS d, "
