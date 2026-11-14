@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## v0.8.3 — 2026-11-14
+- Eski sürümle (v0.7.0 öncesi) oluşturulmuş analizlerde fatura dökümü, Faturalar ekranı ve hesaplama dışı bırakma
+  sessizce gizleniyordu. Artık panelde bunun nedeni ve çözümü (yedeği yeniden açıp analizi baştan oluşturmak) açıkça
+  yazıyor; toplam kutuları her zaman tıklanabilir ve eski analizde aynı açıklamayı gösterir.
+
 ## v0.8.2 — 2026-11-14
 - **Faturaları toplu hesaplama dışı bırakma:** Faturalar ekranında her satırın başında kutucuk var. İşaretleyip
   **İşaretlileri çıkar** ile, ya da filtreleyip (tarih, cari, ürün, tür, fatura no, ambar) **Filtredeki faturaların

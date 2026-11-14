@@ -1226,8 +1226,10 @@ def test_eski_analizde_fatura_ekrani_uyarir(depo, tmp_path, monkeypatch):
     (kl / "bilgi.json").write_text(json.dumps({"firma": "001", "firma_ad": "X", "donemler": ["01"], "kaynak": "x",
                                                "tarih_bas": "", "tarih_bit": "", "olusturma": ""}), encoding="utf-8")
     c = A.app.test_client()
-    assert "fatura listesi yok" in c.get("/faturalar/20250101_000000_F001").get_data(as_text=True)
-    assert 'href="/faturalar/' not in c.get("/panel/20250101_000000_F001").get_data(as_text=True)
+    assert "Bu analizde fatura dökümü yok" in c.get("/faturalar/20250101_000000_F001").get_data(as_text=True)
+    p = c.get("/panel/20250101_000000_F001").get_data(as_text=True)
+    assert "eski bir sürümüyle oluşturulmuş" in p and "Yedeği yeniden aç" in p
+    assert 'href="/faturalar/20250101_000000_F001"' in p and "?tur=satis" not in p    # kutular açıklama sayfasına gider
     assert c.get("/indir/20250101_000000_F001/excel").status_code == 200
 
 

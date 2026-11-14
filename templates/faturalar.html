@@ -21,8 +21,10 @@
 </div>
 
 {% if not v %}
-<div class="uyari" style="margin-top:16px">Bu analiz programın önceki bir sürümüyle oluşturulmuş; fatura listesi yok.
-  Logo yedeğini yeniden seçip analizi baştan oluşturun.</div>
+<div class="uyari" style="margin-top:16px;border-width:2px"><b>Bu analizde fatura dökümü yok</b>, çünkü programın eski bir sürümüyle oluşturulmuş
+  (fatura listesi v0.7.0 ile geldi ve yedekten yeniden okunması gerekiyor).<br>
+  <b>Çözüm:</b> Logo yedeğini (.bak) yeniden seçip analizi baştan oluşturun; birkaç dakika sürer. Sonra paneldeki toplamlara tıklayınca
+  faturalar tek tek açılır. <a class="btn kucuk" style="margin-left:8px" href="/">Yedeği yeniden aç</a></div>
 {% else %}
 <form class="kart" method="get" style="margin-top:16px">
   <div class="filtre">
