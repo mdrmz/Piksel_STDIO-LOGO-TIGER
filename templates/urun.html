@@ -13,8 +13,9 @@
 </div>
 
 <div class="izgara i4" style="margin-top:16px">
-  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ t.net_tutar|tl }} ₺</div>
-    <div class="kucuk soluk">{{ t.miktar|tl }} birim · {{ t.fatura|tl }} fatura</div></div>
+  <{{ 'a' if fatura_var else 'div' }} class="kart kpi kpi-link" {% if fatura_var %}href="/faturalar/{{ aid }}?urun_kod={{ kod|urlencode }}&tur=satis&tur=satis_iade&durum=gecerli"{% endif %}>
+    <div class="ad">Net satış (KDV hariç){% if fatura_var %}<span class="git">fatura fatura gör ›</span>{% endif %}</div><div class="deger">{{ t.net_tutar|tl }} ₺</div>
+    <div class="kucuk soluk">{{ t.miktar|tl }} birim · {{ t.fatura|tl }} fatura</div></{{ 'a' if fatura_var else 'div' }}>
   <div class="kart kpi"><div class="ad">Tahmini brüt kâr</div><div class="deger">{% if t.kar is not none %}{{ t.kar|tl }} ₺{% else %}–{% endif %}</div>
     <div class="kucuk soluk">{% if t.marj is not none %}marj {{ t.marj|yuzde }} · son alış maliyetiyle{% else %}maliyet verisi yok{% endif %}</div></div>
   <div class="kart kpi"><div class="ad">Ortalama net birim fiyat</div><div class="deger">{% if t.ort_fiyat %}{{ t.ort_fiyat|tl(2) }} ₺{% else %}–{% endif %}</div>

@@ -40,15 +40,21 @@
 {% endif %}
 <div id="pbi-durum" class="uyari" style="margin-top:14px;display:none"></div>
 {% if bilgi.uyari %}<div class="uyari" style="margin-top:14px"><b>Dikkat:</b> {{ bilgi.uyari }}</div>{% endif %}
+<style>a.kpi-link { text-decoration:none; color:inherit; display:block; } a.kpi-link:hover { border-color:var(--mavi); box-shadow:0 0 0 2px #DCE7F8; }
+  a.kpi-link .git { color:var(--mavi); font-size:12px; float:right; font-weight:400; }</style>
+{% set kt = 'a' if fatura_var else 'div' %}
 <div class="izgara i4" style="margin-top:20px">
-  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ o.net_satis|tl }} ₺</div>
-    <div class="kucuk soluk">iade {{ o.iade_tutar|tl }} ₺ · {{ o.iade_orani|yuzde }}</div></div>
-  <div class="kart kpi"><div class="ad">Fatura sayısı</div><div class="deger">{{ o.fatura_sayisi|tl }}</div>
-    <div class="kucuk soluk">ortalama {{ o.ortalama_fatura|tl }} ₺</div></div>
-  <div class="kart kpi"><div class="ad">Müşteri / ürün</div><div class="deger">{{ o.musteri_sayisi|tl }} / {{ o.urun_sayisi|tl }}</div>
-    <div class="kucuk soluk">satış yapılan</div></div>
-  <div class="kart kpi"><div class="ad">Net alış (KDV hariç)</div><div class="deger">{{ o.net_alis|tl }} ₺</div>
-    <div class="kucuk soluk">{{ o.tedarikci_sayisi }} tedarikçi</div></div>
+  <{{ kt }} class="kart kpi kpi-link" {% if fatura_var %}href="/faturalar/{{ aid }}?tur=satis&tur=satis_iade&durum=gecerli{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu toplamı oluşturan faturaları tek tek görün"{% endif %}>
+    <div class="ad">Net satış (KDV hariç){% if fatura_var %}<span class="git">fatura fatura gör ›</span>{% endif %}</div><div class="deger">{{ o.net_satis|tl }} ₺</div>
+    <div class="kucuk soluk">iade {{ o.iade_tutar|tl }} ₺ · {{ o.iade_orani|yuzde }}</div></{{ kt }}>
+  <{{ kt }} class="kart kpi kpi-link" {% if fatura_var %}href="/faturalar/{{ aid }}?tur=satis&durum=gecerli{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Satış faturalarını tek tek görün"{% endif %}>
+    <div class="ad">Fatura sayısı{% if fatura_var %}<span class="git">liste ›</span>{% endif %}</div><div class="deger">{{ o.fatura_sayisi|tl }}</div>
+    <div class="kucuk soluk">ortalama {{ o.ortalama_fatura|tl }} ₺</div></{{ kt }}>
+  <a class="kart kpi kpi-link" href="/abc/{{ aid }}/musteri{{ aq }}" title="Müşteri listesi"><div class="ad">Müşteri / ürün<span class="git">liste ›</span></div><div class="deger">{{ o.musteri_sayisi|tl }} / {{ o.urun_sayisi|tl }}</div>
+    <div class="kucuk soluk">satış yapılan</div></a>
+  <{{ kt }} class="kart kpi kpi-link" {% if fatura_var %}href="/faturalar/{{ aid }}?tur=alis&tur=alis_iade&durum=gecerli{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}" title="Bu toplamı oluşturan alış faturalarını tek tek görün"{% endif %}>
+    <div class="ad">Net alış (KDV hariç){% if fatura_var %}<span class="git">fatura fatura gör ›</span>{% endif %}</div><div class="deger">{{ o.net_alis|tl }} ₺</div>
+    <div class="kucuk soluk">{{ o.tedarikci_sayisi }} tedarikçi</div></{{ kt }}>
 </div>
 
 {% if eski_surum %}

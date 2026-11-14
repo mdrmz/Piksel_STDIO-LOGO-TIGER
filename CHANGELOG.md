@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## v0.8.1 — 2026-11-14
+- **Toplamlar tıklanabilir:** paneldeki Net satış, Fatura sayısı ve Net alış kutularına tıklayınca o toplamı oluşturan
+  faturalar tek tek açılır (üstteki toplam panelle aynıdır). Ürün kartı, cari kartı ve ay detayındaki Net satış kutusu da
+  aynı şekilde o ürünün / carinin / ayın faturalarına gider. Müşteri / ürün kutusu müşteri listesini açar.
+
 ## v0.8.0 — 2026-11-13
 Ürün ve cari kartları, aya tıklayıp içine inme, hesaplama dışı bırakma.
 - **Ürün kartı:** panelde ya da listelerde bir ürüne tıklayınca açılır (ya da arama kutusundan). Aylara göre satış

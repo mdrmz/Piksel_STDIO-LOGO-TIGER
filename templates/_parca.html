@@ -13,6 +13,8 @@
   .cubuk-grafik a:hover .d { display:block; }
   .tr-tikla tr[data-href] { cursor:pointer; } .tr-tikla tr[data-href]:hover td { background:#F7F9FC; }
   .olcu-sec a { margin-right:4px; }
+  a.kpi-link { text-decoration:none; color:inherit; display:block; } a.kpi-link:hover { border-color:var(--mavi); box-shadow:0 0 0 2px #DCE7F8; }
+  a.kpi-link .git { color:var(--mavi); font-size:12px; float:right; font-weight:400; }
   .eksi { color:#B42318; } .arti { color:#1E6B2F; }
 </style>
 <script>document.addEventListener('click', e => { const tr = e.target.closest('tr[data-href]'); if (tr && !e.target.closest('a,button,form')) location.href = tr.dataset.href; });</script>

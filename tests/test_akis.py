@@ -1418,3 +1418,38 @@ def test_kart_ve_haric_ekranlari(tmp_path, monkeypatch):
     yol = tmp_path / "r.xlsx"
     yol.write_bytes(c.get(f"/indir/{aid}/excel").data)
     assert {"Ürün-Cari", "Ürün Aylık", "Cari Aylık"} <= set(openpyxl.load_workbook(yol, read_only=True).sheetnames)
+
+
+def test_panel_toplami_faturalardan_saglanir(tmp_path, monkeypatch):
+    """Paneldeki Net satış / Net alış kutusu fatura listesine gider ve oradaki toplam panelle aynıdır."""
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import re as _re
+    import app as A
+    from werkzeug.datastructures import MultiDict
+    from urllib.parse import parse_qsl, urlsplit
+    from core import fatura
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(600):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01", "02"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    depo = os.path.join(str(tmp_path), aid, "analiz.sqlite")
+    o = A.Analiz(depo).ozet()
+    p = c.get(f"/panel/{aid}").get_data(as_text=True)
+    baglar = [b.replace("&amp;", "&") for b in _re.findall(r'class="kart kpi kpi-link" href="([^"]+)"', p)]
+    assert len(baglar) == 4
+    v = fatura.veri(depo)
+    for bag, anahtar, beklenen in ((baglar[0], "satis_net", o["net_satis"]), (baglar[3], "alis_net", o["net_alis"])):
+        assert c.get(bag).status_code == 200
+        f, _ = fatura.suz(v, fatura.Filtre.istekten(MultiDict(parse_qsl(urlsplit(bag).query))))
+        assert fatura.ozet(f, None)[anahtar] == pytest.approx(beklenen, abs=0.01)
+    f, _ = fatura.suz(v, fatura.Filtre.istekten(MultiDict(parse_qsl(urlsplit(baglar[1]).query))))
+    assert len(f) == o["fatura_sayisi"]

@@ -22,8 +22,9 @@
   bu yüzden aşağıda satış görünmez. Faturaları <a href="/faturalar/{{ aid }}?cari_kod={{ kod|urlencode }}">fatura listesinde</a> durur.</div>{% endif %}
 
 <div class="izgara i4" style="margin-top:16px">
-  <div class="kart kpi"><div class="ad">Net satış (KDV hariç)</div><div class="deger">{{ t.net_tutar|tl }} ₺</div>
-    <div class="kucuk soluk">{{ t.fatura|tl }} fatura{% if t.ort_fatura %} · ortalama {{ t.ort_fatura|tl }} ₺{% endif %}</div></div>
+  <{{ 'a' if fatura_var else 'div' }} class="kart kpi kpi-link" {% if fatura_var %}href="/faturalar/{{ aid }}?cari_kod={{ kod|urlencode }}&tur=satis&tur=satis_iade&durum=gecerli"{% endif %}>
+    <div class="ad">Net satış (KDV hariç){% if fatura_var %}<span class="git">fatura fatura gör ›</span>{% endif %}</div><div class="deger">{{ t.net_tutar|tl }} ₺</div>
+    <div class="kucuk soluk">{{ t.fatura|tl }} fatura{% if t.ort_fatura %} · ortalama {{ t.ort_fatura|tl }} ₺{% endif %}</div></{{ 'a' if fatura_var else 'div' }}>
   <div class="kart kpi"><div class="ad">Tahmini brüt kâr</div><div class="deger">{% if t.kar is not none %}{{ t.kar|tl }} ₺{% else %}–{% endif %}</div>
     <div class="kucuk soluk">{% if t.marj is not none %}marj {{ t.marj|yuzde }}{% else %}maliyet verisi yok{% endif %}{% if t.iade %} · iade {{ t.iade|tl }} ₺{% endif %}</div></div>
   <div class="kart kpi"><div class="ad">Alacak (KDV dahil)</div><div class="deger">{% if alacak %}{{ alacak.bakiye|tl }} ₺{% else %}–{% endif %}</div>
