@@ -558,7 +558,9 @@ def faturalar_sayfa(aid):
     return render_template("faturalar.html", aid=aid, bilgi=bilgi, v=v, fl=fl, tur_grup=fatura.TUR_GRUP,
                            f=f.iloc[(sayfa - 1) * SAYFA_BOYU: sayfa * SAYFA_BOYU], o=fatura.ozet(f, urun_s),
                            sayfa=sayfa, sayfa_say=sayfa_say, url=url, sirala_url=sirala_url, fark_esik=fatura.FARK_ESIK,
-                           excel_url=f"/faturalar/{aid}/excel?" + request.query_string.decode())
+                           excel_url=f"/faturalar/{aid}/excel?" + request.query_string.decode(),
+                           sorgu=url(hata=None, sayfa=None).split("?", 1)[1], buraya=url(hata=None), hata=request.args.get("hata"),
+                           toplu_ekle=int((~f["iptal"] & ~f["haric"]).sum()), toplu_geri=int((f["haric"] & ~f["iptal"] & (f["haric_neden"] == "Fatura hariç tutuldu")).sum()))
 
 
 @app.route("/faturalar/<aid>/excel")
@@ -705,11 +707,37 @@ def haric_islem(aid, islem):
                 hatalar.append(h)
     elif islem == "cikar":
         haric.cikar(depo, tur, request.form.get("anahtar", ""))
+    elif islem == "temizle":
+        haric.temizle(depo, tur)
+    elif islem == "toplu":
+        # fatura listesinden: işaretlenen faturalar ya da filtreye uyanların tamamı
+        from urllib.parse import parse_qsl
+        from werkzeug.datastructures import MultiDict
+        from core import fatura
+        ne = "cikar" if request.form.get("ne") == "geri_al" else "ekle"
+        if request.form.get("kapsam") == "filtre":
+            v = fatura.veri(depo)
+            fl = fatura.Filtre.istekten(MultiDict(parse_qsl(request.form.get("sorgu", ""))))
+            if v is None or not fl.aktif_mi():
+                hatalar.append("Tüm faturalar birden çıkarılamaz; önce filtreleyin.")
+                anahtarlar = []
+            else:
+                f, _ = fatura.suz(v, fl)
+                f = f[~f["iptal"] & (f["haric_neden"] != "Cari hariç tutuldu")]
+                anahtarlar = list(f.loc[f["haric"] if ne == "cikar" else ~f["haric"], "anahtar"])
+        else:
+            anahtarlar = request.form.getlist("anahtar")
+            if not anahtarlar:
+                hatalar.append("Önce listeden fatura işaretleyin.")
+        if anahtarlar:
+            haric.toplu(depo, ne, "fatura", anahtarlar, request.form.get("aciklama", ""))
     else:
         abort(404)
     donus = request.form.get("donus") or ""
-    if hatalar or not donus.startswith("/") or donus.startswith("//"):
+    if (hatalar and islem != "toplu") or not donus.startswith("/") or donus.startswith("//"):
         donus = f"/haric/{aid}" + (f"?hata={quote(' '.join(hatalar))}" if hatalar else "")
+    elif hatalar:
+        donus += ("&" if "?" in donus else "?") + "hata=" + quote(" ".join(hatalar))
     return redirect(donus)
 
 

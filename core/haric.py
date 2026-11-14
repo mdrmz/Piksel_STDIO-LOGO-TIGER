@@ -38,29 +38,32 @@ def _hazirla(con):
 
 
 def liste(con) -> pd.DataFrame:
-    """Hariç tutulanlar: tur, anahtar, aciklama, zaman, ad (cari adı ya da fatura no), tutar (düşülen net satış + alış)."""
-    bos = pd.DataFrame(columns=["tur", "anahtar", "aciklama", "zaman", "ad", "tutar"])
+    """Hariç tutulanlar: tur, anahtar, aciklama, zaman, ad (cari adı ya da fatura no), ek (fatura: tarih · cari),
+    tutar (düşülen net satış + alış). Çok sayıda faturada da hızlıdır (toplu sorgu)."""
+    bos = pd.DataFrame(columns=["tur", "anahtar", "aciklama", "zaman", "ad", "ek", "tutar"])
     if "haric" not in _tablolar(con):
         return bos
-    h = pd.read_sql_query("SELECT tur, anahtar, aciklama, zaman FROM haric ORDER BY zaman DESC", con)
+    h = pd.read_sql_query("SELECT tur, anahtar, aciklama, zaman FROM haric ORDER BY zaman DESC, anahtar", con)
     if h.empty:
         return bos
-    adlar, tutarlar = [], []
-    for r in h.itertuples():
-        if r.tur == "cari":
-            x = con.execute("SELECT cari_ad FROM dim_cari WHERE cari_kod = ?", (r.anahtar,)).fetchone()
-            t = sum(con.execute(f"SELECT COALESCE(SUM(net_tutar), 0) FROM {f}_tum WHERE cari_ref IN "
-                                "(SELECT cari_ref FROM dim_cari WHERE cari_kod = ?)", (r.anahtar,)).fetchone()[0]
-                    for f in FAKTLAR)
-        else:
-            donem, _, ref = r.anahtar.partition(":")
-            x = con.execute("SELECT fatura_no FROM dim_fatura WHERE CAST(donem AS TEXT) = ? AND fatura_ref = ?",
-                            (donem, int(ref))).fetchone()
-            t = sum(con.execute(f"SELECT COALESCE(SUM(net_tutar), 0) FROM {f}_tum WHERE CAST(donem AS TEXT) = ? "
-                                "AND fatura_ref = ?", (donem, int(ref))).fetchone()[0] for f in FAKTLAR)
-        adlar.append(x[0] if x else "")
-        tutarlar.append(float(t or 0))
-    return h.assign(ad=adlar, tutar=tutarlar)
+    birlesik = " UNION ALL ".join(f"SELECT cari_ref, donem, fatura_ref, net_tutar FROM {f}_tum" for f in FAKTLAR)
+    c = pd.read_sql_query(
+        "SELECT c.cari_kod AS anahtar, MAX(c.cari_ad) AS ad, '' AS ek, COALESCE(SUM(t.net_tutar), 0) AS tutar FROM dim_cari c "
+        f"LEFT JOIN ({birlesik}) t ON t.cari_ref = c.cari_ref "
+        "WHERE c.cari_kod IN (SELECT anahtar FROM haric WHERE tur = 'cari') GROUP BY c.cari_kod", con).assign(tur="cari")
+    f = pd.read_sql_query(
+        "SELECT CAST(d.donem AS TEXT) || ':' || CAST(d.fatura_ref AS TEXT) AS anahtar, d.fatura_no AS ad, "
+        "substr(d.tarih, 1, 10) || ' · ' || COALESCE(c.cari_ad, '') AS ek FROM dim_fatura d "
+        "LEFT JOIN dim_cari c ON c.cari_ref = d.cari_ref "
+        "WHERE CAST(d.donem AS TEXT) || ':' || CAST(d.fatura_ref AS TEXT) IN (SELECT anahtar FROM haric WHERE tur = 'fatura')", con)
+    ft = pd.read_sql_query(
+        f"SELECT CAST(donem AS TEXT) || ':' || CAST(fatura_ref AS TEXT) AS anahtar, SUM(net_tutar) AS tutar FROM ({birlesik}) "
+        "WHERE CAST(donem AS TEXT) || ':' || CAST(fatura_ref AS TEXT) IN (SELECT anahtar FROM haric WHERE tur = 'fatura') "
+        "GROUP BY 1", con)
+    f = f.merge(ft, on="anahtar", how="left").assign(tur="fatura")
+    h = h.merge(pd.concat([c, f], ignore_index=True), on=["tur", "anahtar"], how="left")
+    h["ad"], h["ek"], h["tutar"] = h["ad"].fillna(""), h["ek"].fillna(""), h["tutar"].fillna(0.0).astype(float)
+    return h
 
 
 def anahtarlar(con) -> tuple[set, set]:
@@ -126,5 +129,48 @@ def cikar(depo: str, tur: str, anahtar: str):
         if "haric" in _tablolar(con):
             con.execute("DELETE FROM haric WHERE tur = ? AND anahtar = ?", (tur, anahtar))
             uygula(con)
+    finally:
+        con.close()
+
+
+def toplu(depo: str, islem: str, tur: str, anahtarlar, aciklama: str = "") -> int:
+    """Birçok kaydı tek seferde hariç tutar ('ekle') ya da geri alır ('cikar'); tablolar bir kez yeniden yazılır.
+    Var olmayan anahtarlar atlanır. Dönen değer: işlenen kayıt sayısı."""
+    if tur not in TURLER or islem not in ("ekle", "cikar"):
+        return 0
+    anahtarlar = sorted({str(a).strip() for a in anahtarlar if str(a).strip()})
+    if not anahtarlar:
+        return 0
+    con = sqlite3.connect(depo)
+    try:
+        if not destekli_mi(con):
+            return 0
+        _hazirla(con)
+        if tur == "cari":
+            gecerli = {r[0] for r in con.execute("SELECT cari_kod FROM dim_cari WHERE cari_kod <> ''")}
+        else:
+            gecerli = {r[0] for r in con.execute("SELECT CAST(donem AS TEXT) || ':' || CAST(fatura_ref AS TEXT) FROM dim_fatura")}
+        anahtarlar = [a for a in anahtarlar if a in gecerli]
+        zaman = f"{dt.datetime.now():%Y-%m-%d %H:%M:%S}"
+        if islem == "ekle":
+            con.executemany("INSERT OR REPLACE INTO haric (tur, anahtar, aciklama, zaman) VALUES (?, ?, ?, ?)",
+                            [(tur, a, (aciklama or "").strip()[:200], zaman) for a in anahtarlar])
+        else:
+            con.executemany("DELETE FROM haric WHERE tur = ? AND anahtar = ?", [(tur, a) for a in anahtarlar])
+        uygula(con)
+        return len(anahtarlar)
+    finally:
+        con.close()
+
+
+def temizle(depo: str, tur: str) -> int:
+    """Bir türdeki (cari / fatura) tüm hariç kayıtlarını geri alır."""
+    con = sqlite3.connect(depo)
+    try:
+        if "haric" not in _tablolar(con) or tur not in TURLER:
+            return 0
+        n = con.execute("DELETE FROM haric WHERE tur = ?", (tur,)).rowcount
+        uygula(con)
+        return n
     finally:
         con.close()

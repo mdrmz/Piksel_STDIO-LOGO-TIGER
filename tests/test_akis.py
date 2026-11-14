@@ -1453,3 +1453,60 @@ def test_panel_toplami_faturalardan_saglanir(tmp_path, monkeypatch):
         assert fatura.ozet(f, None)[anahtar] == pytest.approx(beklenen, abs=0.01)
     f, _ = fatura.suz(v, fatura.Filtre.istekten(MultiDict(parse_qsl(urlsplit(baglar[1]).query))))
     assert len(f) == o["fatura_sayisi"]
+
+
+def test_toplu_fatura_haric(tmp_path, monkeypatch):
+    """Fatura listesinden işaretli faturalar ve filtredeki tüm faturalar toplu çıkarılır / geri alınır."""
+    monkeypatch.setenv("LOGO_ANALIZ_KLASOR", str(tmp_path))
+    import importlib
+    import re as _re
+    import app as A
+    from core import fatura, haric
+    importlib.reload(A)
+    c = A.app.test_client()
+
+    def bekle():
+        for _ in range(600):
+            d = c.get("/durum").json
+            if not d["calisiyor"]:
+                return d
+            time.sleep(0.1)
+    c.post("/kaynak", data={"tur": "demo"}); bekle()
+    c.post("/aktar", data={"firma": "001", "donem_001": ["01"], "sadece_faturali": "1"})
+    aid = bekle()["sonraki"].rsplit("/", 1)[-1]
+    depo = os.path.join(str(tmp_path), aid, "analiz.sqlite")
+    net = lambda: A.Analiz(depo).ozet()["net_satis"]  # noqa: E731
+    n0 = net()
+    h = c.get(f"/faturalar/{aid}?tur=satis&bas=2025-03-01&bit=2025-03-31").get_data(as_text=True)
+    assert 'name="anahtar"' in h and "faturanın hepsini çıkar" in h and "İşaretlileri çıkar" in h
+    assert "faturanın hepsini çıkar" not in c.get(f"/faturalar/{aid}").get_data(as_text=True)   # filtresiz: toplu yok
+    # 1) işaretli üç fatura
+    v = fatura.veri(depo)
+    f, _ = fatura.suz(v, _filtre(tur="satis", bas="2025-03-01", bit="2025-03-31", durum="gecerli"))
+    sec = f.head(3)
+    r = c.post(f"/haric/{aid}/toplu", data={"tur": "fatura", "kapsam": "secili", "ne": "cikar", "anahtar": list(sec["anahtar"]),
+                                            "aciklama": "deneme", "donus": f"/faturalar/{aid}?tur=satis"})
+    assert r.status_code == 302 and r.headers["Location"] == f"/faturalar/{aid}?tur=satis"
+    assert net() == pytest.approx(n0 - sec["analiz_tutar"].sum(), abs=0.01)
+    # 2) filtredeki hepsi (Mart 2025 satışları)
+    r = c.post(f"/haric/{aid}/toplu", data={"tur": "fatura", "kapsam": "filtre", "ne": "cikar",
+                                            "sorgu": "tur=satis&bas=2025-03-01&bit=2025-03-31", "donus": f"/faturalar/{aid}?durum=haric"})
+    assert net() == pytest.approx(n0 - f["analiz_tutar"].sum(), abs=0.01)
+    con = sqlite3.connect(depo)
+    l = haric.liste(con)
+    con.close()
+    assert len(l) == len(f) and l["tutar"].sum() == pytest.approx(f["analiz_tutar"].sum(), abs=0.01) and (l["ek"] != "").all()
+    assert "Tüm faturaları geri al" in c.get(f"/haric/{aid}").get_data(as_text=True)
+    # filtresiz 'hepsini çıkar' reddedilir; işaretsiz gönderim de
+    r = c.post(f"/haric/{aid}/toplu", data={"tur": "fatura", "kapsam": "filtre", "ne": "cikar", "sorgu": "", "donus": f"/faturalar/{aid}"})
+    assert "hata=" in r.headers["Location"]
+    r = c.post(f"/haric/{aid}/toplu", data={"tur": "fatura", "kapsam": "secili", "ne": "cikar", "donus": f"/faturalar/{aid}"})
+    assert "hata=" in r.headers["Location"] and net() == pytest.approx(n0 - f["analiz_tutar"].sum(), abs=0.01)
+    # 3) filtredekileri geri al (yarısı), sonra tümünü temizle
+    c.post(f"/haric/{aid}/toplu", data={"tur": "fatura", "kapsam": "filtre", "ne": "geri_al",
+                                        "sorgu": "tur=satis&bas=2025-03-01&bit=2025-03-15", "donus": f"/faturalar/{aid}"})
+    ilk_yari = f[f["tarih"] < pd.Timestamp("2025-03-16")]
+    assert 0 < len(ilk_yari) < len(f)
+    assert net() == pytest.approx(n0 - f["analiz_tutar"].sum() + ilk_yari["analiz_tutar"].sum(), abs=0.01)
+    c.post(f"/haric/{aid}/temizle", data={"tur": "fatura"})
+    assert net() == pytest.approx(n0, abs=0.001)

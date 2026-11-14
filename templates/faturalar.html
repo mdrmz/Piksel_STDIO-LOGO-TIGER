@@ -72,13 +72,27 @@
   <b>Fark</b>: Logo'nun fatura başlığındaki KDV hariç tutar (<code>NETTOTAL − TOTALVAT</code>) ile satırlar arasındaki fark; {{ fark_esik|tl }} ₺'yi aşınca kırmızı.
   Faturaya tıklayınca satırları, Logo'da bulmak için tablo adı ve <code>LOGICALREF</code> ile açılır.</p>
 
+{% if hata %}<div class="uyari" style="margin-top:10px">{{ hata }}</div>{% endif %}
+<form method="post" action="/haric/{{ aid }}/toplu" id="toplu">
+<input type="hidden" name="tur" value="fatura"><input type="hidden" name="donus" value="{{ buraya }}"><input type="hidden" name="sorgu" value="{{ sorgu }}">
+<input type="hidden" name="kapsam" value="secili"><input type="hidden" name="ne" value="cikar">
+<div class="kart" style="margin-top:10px;padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+  <b class="kucuk">Hesaplama dışı bırak:</b>
+  <button class="btn kucuk sil" type="button" data-kapsam="secili" data-ne="cikar">İşaretlileri çıkar (<span class="say">0</span>)</button>
+  <button class="btn kucuk ikincil" type="button" data-kapsam="secili" data-ne="geri_al">İşaretlileri geri al</button>
+  {% if fl.aktif_mi() and toplu_ekle %}<button class="btn kucuk sil" type="button" data-kapsam="filtre" data-ne="cikar" data-n="{{ toplu_ekle }}">Filtredeki {{ toplu_ekle|tl }} faturanın hepsini çıkar</button>{% endif %}
+  {% if fl.aktif_mi() and toplu_geri %}<button class="btn kucuk ikincil" type="button" data-kapsam="filtre" data-ne="geri_al" data-n="{{ toplu_geri }}">Filtredeki {{ toplu_geri|tl }} hariç faturayı geri al</button>{% endif %}
+  <input type="text" name="aciklama" placeholder="Neden (isteğe bağlı): ör. grup içi satış" style="max-width:280px;padding:5px 8px">
+  <span class="kucuk soluk">Çıkarılan faturalar ciro, kâr, ABC ve raporlara girmez; silinmez, geri alınabilir.</span>
+</div>
 <div class="kart" style="padding:6px 10px;margin-top:10px;overflow-x:auto">
 <table class="fat">
   {% macro th(kolon, ad, sag=False) %}<th class="{{ 's' if sag }}"><a href="{{ sirala_url(kolon) }}">{{ ad }}{% if fl.sirala == kolon %} {{ '▲' if fl.yon == 'artan' else '▼' }}{% endif %}</a></th>{% endmacro %}
-  <tr>{{ th('tarih','Tarih') }}{{ th('fatura_no','Fatura no') }}{{ th('tur','Tür') }}{{ th('cari_ad','Cari') }}{{ th('ambar_ad','Ambar') }}
+  <tr><th><input type="checkbox" id="hepsi" title="Bu sayfadakilerin hepsini işaretle"></th>{{ th('tarih','Tarih') }}{{ th('fatura_no','Fatura no') }}{{ th('tur','Tür') }}{{ th('cari_ad','Cari') }}{{ th('ambar_ad','Ambar') }}
     <th class="s">Satır</th>{% if o.urun %}<th class="s">Bu ürün</th>{% endif %}{{ th('analiz_tutar','Fatura tutarı (KDV hariç)', True) }}{{ th('logo_net','Logo genel toplam', True) }}{{ th('fark','Fark', True) }}<th>Logo kaydı</th></tr>
   {% for r in f.itertuples() %}
   <tr class="{{ 'iptal' if r.iptal }}" style="cursor:pointer" onclick="location.href='/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}'">
+    <td onclick="event.stopPropagation()">{% if not r.iptal and r.haric_neden != 'Cari hariç tutuldu' %}<input type="checkbox" name="anahtar" value="{{ r.anahtar }}">{% endif %}</td>
     <td>{{ r.tarih.strftime('%d.%m.%Y') if r.tarih == r.tarih else '' }}</td>
     <td><a href="/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}">{{ r.fatura_no or '(no yok)' }}</a>{% if r.belge_no %}<div class="kucuk soluk">belge {{ r.belge_no }}</div>{% endif %}</td>
     <td class="durum">{{ r.tur }}{% if r.iptal %} <span class="rozet rC">iptal</span>{% endif %}{% if r.haric and not r.iptal %} <span class="rozet rB" title="{{ r.haric_neden }}">hariç</span>{% endif %}</td>
@@ -91,9 +105,26 @@
     <td class="s {{ 'fark' if r.fark|abs > fark_esik }}">{{ r.fark|tl(2) if r.fark|abs > fark_esik else '–' }}</td>
     <td class="logo-ref">{{ r.logo_tablo }}<br>ref {{ r.fatura_ref }}</td>
   </tr>
-  {% else %}<tr><td colspan="11" class="soluk">Filtreye uyan fatura yok.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="12" class="soluk">Filtreye uyan fatura yok.</td></tr>{% endfor %}
 </table>
 </div>
+</form>
+<script>
+(() => {
+  const f = document.getElementById('toplu'), kutular = () => [...f.querySelectorAll('input[name=anahtar]')];
+  const say = () => f.querySelector('.say').textContent = kutular().filter(k => k.checked).length;
+  f.addEventListener('change', e => { if (e.target.id === 'hepsi') kutular().forEach(k => k.checked = e.target.checked); say(); });
+  f.querySelectorAll('button[data-kapsam]').forEach(b => b.onclick = () => {
+    const secili = kutular().filter(k => k.checked).length, filtre = b.dataset.kapsam === 'filtre', cikar = b.dataset.ne === 'cikar';
+    if (!filtre && !secili) { alert('Önce listeden fatura işaretleyin (satırın başındaki kutu).'); return; }
+    const n = filtre ? Number(b.dataset.n).toLocaleString('tr-TR') : secili;
+    const soru = cikar ? `${n} fatura hesaplamadan çıkarılsın mı?\n\nCiro, kâr, ABC ve tüm raporlardan düşer. Silinmez; istediğiniz zaman geri alabilirsiniz.`
+                       : `${n} fatura yeniden hesaplamaya dahil edilsin mi?`;
+    if (!confirm(soru)) return;
+    f.kapsam.value = b.dataset.kapsam; f.ne.value = b.dataset.ne; f.submit();
+  });
+})();
+</script>
 {% if sayfa_say > 1 %}
 <div class="sayfalar kucuk" style="margin-top:12px">
   {% if sayfa > 1 %}<a href="{{ url(sayfa=(sayfa - 1)|string) }}">‹ Önceki</a>{% endif %}

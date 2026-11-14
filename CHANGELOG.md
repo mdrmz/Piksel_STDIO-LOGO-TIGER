@@ -1,5 +1,13 @@
 # Değişiklik günlüğü
 
+## v0.8.2 — 2026-11-14
+- **Faturaları toplu hesaplama dışı bırakma:** Faturalar ekranında her satırın başında kutucuk var. İşaretleyip
+  **İşaretlileri çıkar** ile, ya da filtreleyip (tarih, cari, ürün, tür, fatura no, ambar) **Filtredeki faturaların
+  hepsini çıkar** ile toplu çıkarılır; aynı şekilde toplu geri alınır. İsteğe bağlı "neden" notu yazılabilir.
+  Filtre yokken "hepsini çıkar" sunulmaz (yanlışlıkla her şeyi çıkarmamak için).
+- Hesaplama dışı sayfası: düşülen toplam tutar, faturaların tarihi ve carisi, **Tüm faturaları geri al** düğmesi;
+  çok sayıda kayıtta da hızlı açılır.
+
 ## v0.8.1 — 2026-11-14
 - **Toplamlar tıklanabilir:** paneldeki Net satış, Fatura sayısı ve Net alış kutularına tıklayınca o toplamı oluşturan
   faturalar tek tek açılır (üstteki toplam panelle aynıdır). Ürün kartı, cari kartı ve ay detayındaki Net satış kutusu da
