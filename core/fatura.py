@@ -64,8 +64,9 @@ def yukle(con) -> Veri:
         ambar = pd.DataFrame({"ambar": pd.Series(dtype=int), "ambar_ad": pd.Series(dtype=str)})
     f["tarih"] = pd.to_datetime(f["tarih"], errors="coerce")
     f["iptal"] = f["iptal"].astype(bool)
-    for c in ("logo_brut", "logo_indirim", "logo_kdv", "logo_net"):
-        f[c] = pd.to_numeric(f[c], errors="coerce")
+    for c in ("logo_brut", "logo_indirim", "logo_kdv", "logo_net", "logo_masraf", "logo_ek_vergi"):
+        if c in f.columns:   # logo_masraf / logo_ek_vergi: v0.9.0 ile gelir
+            f[c] = pd.to_numeric(f[c], errors="coerce")
     s["net_tutar"] = pd.to_numeric(s["net_tutar"], errors="coerce").fillna(0.0)
     s["miktar"] = pd.to_numeric(s["miktar"], errors="coerce").fillna(0.0)
 

@@ -212,7 +212,7 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
         bas = _oku(kaynak, f"LG_{f}_{p}_INVOICE", {
             "LOGICALREF": 0, "FICHENO": "", "DOCODE": "", "DATE_": None, "TRCODE": 0, "CLIENTREF": 0,
             "SOURCEINDEX": 0, "CANCELLED": 0, "GROSSTOTAL": np.nan, "TOTALDISCOUNTS": np.nan, "TOTALVAT": np.nan,
-            "NETTOTAL": np.nan, "SALESMANREF": 0, "GENEXP1": ""})
+            "NETTOTAL": np.nan, "SALESMANREF": 0, "GENEXP1": "", "TOTALEXPENSES": np.nan, "TOTALADDTAX": np.nan})
         for c in ("FICHENO", "DOCODE", "GENEXP1"):
             bas[c] = bas[c].fillna("").astype(str).str.strip().map(turkce_onar)
         inv = bas[["LOGICALREF", "FICHENO", "CANCELLED", "TRCODE", "SALESMANREF"]].copy()
@@ -232,6 +232,8 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
             "logo_indirim": pd.to_numeric(bas["TOTALDISCOUNTS"], errors="coerce").values,
             "logo_kdv": pd.to_numeric(bas["TOTALVAT"], errors="coerce").values,
             "logo_net": pd.to_numeric(bas["NETTOTAL"], errors="coerce").values,
+            "logo_masraf": pd.to_numeric(bas["TOTALEXPENSES"], errors="coerce").values,     # Logo farkının nedeni için
+            "logo_ek_vergi": pd.to_numeric(bas["TOTALADDTAX"], errors="coerce").values,
             "temsilci_ref": pd.to_numeric(bas["SALESMANREF"], errors="coerce").fillna(0).astype("int64").values,
             "aciklama": bas["GENEXP1"].values}))
         say(f"{on}Dönem {p}: stok hareket satırları okunuyor…")

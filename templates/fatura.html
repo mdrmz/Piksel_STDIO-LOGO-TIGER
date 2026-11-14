@@ -38,7 +38,9 @@
   </table>
   {% if f.iptal %}<p class="kucuk uyari" style="margin-top:10px">Fatura Logo'da iptal edilmiş; hiçbir analize katılmaz.</p>
   {% elif f.fark|abs > fark_esik %}<p class="kucuk uyari" style="margin-top:10px">Logo'nun başlık tutarı ile satırların toplamı
-    farklı. Aşağıda durum sütununa bakın: iptal edilmiş ya da tipi farklı (indirim, masraf, hizmet…) satırlar nedeni olabilir.</p>{% endif %}
+    farklı.{% if neden %} <b>Neden: {{ neden.neden }}</b>{% if neden.hesap %} ({{ neden.hesap }}){% endif %} — {{ neden.aciklama }}
+    <b>Analize etkisi:</b> {{ neden.etki }}.{% else %} Aşağıda durum sütununa bakın.{% endif %}
+    <a href="/kontrol/{{ aid }}#farklar">Tüm farklı faturalar ›</a></p>{% endif %}
   </div>
 </div>
 

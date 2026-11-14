@@ -91,6 +91,8 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 | **Ürün kartı / cari kartı** | Aylara göre satış (tıklanabilir), o ayın müşterileri/ürünleri, kime ne kadar, fiyat farkları, otomatik "ne zaman, neden" bulguları |
 | **Ay detayı** | Bir ayın satışını oluşturan cariler ve ürünler; önceki aya / geçen yıla göre farkın kaynağı |
 | **Hesaplama dışı** | Seçilen carileri ve faturaları tüm analizlerden çıkarma (geri alınabilir) |
+| **Tarih filtresi** | Her ekranın üstündeki çubuktan bir kez seçilen tarih aralığı panel, listeler, kartlar, faturalar, Excel, PDF, Power BI paketi ve yapay zekâya birlikte uygulanır (stok ve cari bakiye son durumdur) |
+| **Veri kontrolü** | Logo'nun fatura toplamıyla farklı çıkan faturalar ve otomatik bulunan nedeni (masraf satırı, iptal satırı, tevkifat, dağıtılmamış indirim…), Logo ile sağlama köprüsü, boş/eksik veriler (carisi seçilmemiş satış, kartı olmayan cari/malzeme, maliyeti bulunamayan satış…) ve Excel çıktısı |
 | **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
 | **Ürün ABC** | Kârlılığa göre (A = tahmini brüt kârın çoğunu getirenler) ya da net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
@@ -209,6 +211,8 @@ Panelin altındaki **Veri notları** kaç satırın neden dışlandığını gö
 | Firma listesinde adlar boş | Firma adları ayrı `LOGODB` yedeğinde duruyor; o yedeği de ikinci yedek olarak ekleyin. |
 | *Diskte yer yetmiyor* / *No space left on device* | Yedeği açmak için yaklaşık `.bak` boyutunun 3–4 katı boş alan gerekir. C: doluysa program yeri olan diğer diski (ör. `D:\LogoAnalizVeri`) kendisi kullanır. Yine yetmiyorsa mesajdaki kadar yer açın. Yedeği tarayıcıdan seçmek yerine **tam yolunu yazmak** bir kopyayı ortadan kaldırır. |
 | Port 5055 dolu | `LOGO_ANALIZ_PORT=5056` ortam değişkeniyle başka port kullanın. |
+| *N fatura Logo'yla farklı* | Panelde **Veri kontrolü**'nü açın: her faturanın nedeni ve analize etkisi yazar. Çoğu (masraf satırı, tevkifat, iptal satırı) programın değil Logo başlık toplamının farklı hesaplanmasındandır. "Açıklanamadı" olanları Logo'da tablo adı + `LOGICALREF` ile açıp bakın. |
+| Bir listede ad ya da tutar yerine boşluk / "–" | **Veri kontrolü → Eksik ya da boş veriler** nedenini ve hangi kayıtlar olduğunu listeler (ör. maliyeti bulunamayan üründe marj hesaplanamaz). |
 
 Herhangi bir sorunda sayfanın altındaki **Tanılama paketi** bağlantısıyla bir zip indirip [Issues](../../issues)'a ekleyin.
 Paket günlükleri ve sistem bilgisini içerir; müşteri verisi, firma ve kullanıcı adları içermez.

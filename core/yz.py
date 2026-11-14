@@ -223,6 +223,13 @@ def baglam(analiz, bilgi: dict, maske: Maske) -> str:
     parcalar = [
         f"# Logo Tiger satış analizi — {maske.gizle(bilgi.get('firma_ad') or 'Firma')} (firma {bilgi.get('firma')})",
         f"Dönem: {o['tarih_bas']} – {o['tarih_bit']}. Tutarlar TL, KDV hariç net. Miktarlar ana birimde.",
+        *([f"**Kullanıcı tarih filtresi seçti: {analiz.tarih_filtre[0] or 'başlangıç'} – {analiz.tarih_filtre[1] or 'son'}.** "
+           "Aşağıdaki özet tablolar bu aralığa göredir. SQL sorgularında da aynı aralığı kullan (ör. "
+           + (f"s.tarih >= '{analiz.tarih_filtre[0]}'" if analiz.tarih_filtre[0] else "")
+           + (" AND " if analiz.tarih_filtre[0] and analiz.tarih_filtre[1] else "")
+           + (f"s.tarih < date('{analiz.tarih_filtre[1]}', '+1 day')" if analiz.tarih_filtre[1] else "")
+           + "); kullanıcı açıkça başka dönem sormadıkça bu aralığın dışına çıkma."]
+          if getattr(analiz, "tarih_filtre", None) else []),
         "## Özet",
         _md_tablo(pd.DataFrame([{k: v for k, v in o.items() if k not in ("tarih_bas", "tarih_bit")}])),
         f"## ABC dağılımı (A ≤ %{esik.a * 100:.0f}, B ≤ %{esik.b * 100:.0f} kümülatif tutar)",

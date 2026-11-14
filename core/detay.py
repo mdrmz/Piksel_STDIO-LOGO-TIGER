@@ -42,8 +42,23 @@ def _oku(con, sql, params=()):
     return d
 
 
-def _tum_aylar(con) -> list[str]:
-    r = con.execute("SELECT MIN(tarih), MAX(tarih) FROM fact_satis").fetchone()
+def _tarih_kosulu(bas: str | None, bit: str | None, kolon: str = "tarih") -> tuple[str, tuple]:
+    """SQL'e eklenecek ' AND tarih >= ? AND tarih < ?' parçası (tarihler 'YYYY-MM-DD HH:MM:SS' metni)."""
+    from .analiz import tarih_araligi
+    b, s = tarih_araligi(bas, bit)
+    sql, p = "", []
+    if b is not None:
+        sql += f" AND {kolon} >= ?"
+        p.append(f"{b:%Y-%m-%d}")
+    if s is not None:
+        sql += f" AND {kolon} < ?"
+        p.append(f"{s:%Y-%m-%d}")
+    return sql, tuple(p)
+
+
+def _tum_aylar(con, bas: str | None = None, bit: str | None = None) -> list[str]:
+    k, p = _tarih_kosulu(bas, bit)
+    r = con.execute(f"SELECT MIN(tarih), MAX(tarih) FROM fact_satis WHERE tarih IS NOT NULL{k}", p).fetchone()
     if not r or not r[0]:
         return []
     return [p.strftime("%Y-%m") for p in pd.period_range(pd.Timestamp(r[0]), pd.Timestamp(r[1]), freq="M")]
@@ -116,7 +131,9 @@ def _donem_karsilastir(s: pd.DataFrame, aylar: list[str], anahtar: list[str], n:
 
 
 # ---------------------------------------------------------------------------- ürün kartı
-def urun_karti(depo: str, kod: str, ay: str | None = None) -> dict | None:
+def urun_karti(depo: str, kod: str, ay: str | None = None, bas: str | None = None, bit: str | None = None) -> dict | None:
+    k, kp = _tarih_kosulu(bas, bit, "s.tarih")
+    ka, kap = _tarih_kosulu(bas, bit, "a.tarih")
     con = sqlite3.connect(depo)
     try:
         m = pd.read_sql_query("SELECT * FROM dim_malzeme WHERE malzeme_kod = ?", con, params=(kod,))
@@ -125,10 +142,10 @@ def urun_karti(depo: str, kod: str, ay: str | None = None) -> dict | None:
         ref = int(m.iloc[0]["malzeme_ref"])
         s = _hazirla(_oku(con, "SELECT s.tarih, s.cari_ref, s.miktar, s.net_tutar, s.maliyet_tutar, s.fatura_no, s.iade, "
                                "c.cari_kod, c.cari_ad, c.sehir FROM fact_satis s LEFT JOIN dim_cari c USING (cari_ref) "
-                               "WHERE s.malzeme_ref = ?", (ref,)))
+                               "WHERE s.malzeme_ref = ?" + k, (ref, *kp)))
         al = _oku(con, "SELECT a.tarih, a.miktar, a.net_tutar, c.cari_kod, c.cari_ad FROM fact_alis a "
-                       "LEFT JOIN dim_cari c USING (cari_ref) WHERE a.malzeme_ref = ?", (ref,))
-        aylar = _tum_aylar(con)
+                       "LEFT JOIN dim_cari c USING (cari_ref) WHERE a.malzeme_ref = ?" + ka, (ref, *kap))
+        aylar = _tum_aylar(con, bas, bit)
         stok = con.execute("SELECT stok_miktar FROM stok_bakiye WHERE malzeme_ref = ?", (ref,)).fetchone()
     finally:
         con.close()
@@ -258,7 +275,10 @@ def _urun_bulgulari(s, aylik, musteri, toplam, aylar) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------- cari kartı
-def cari_karti(depo: str, kod: str, ay: str | None = None) -> dict | None:
+def cari_karti(depo: str, kod: str, ay: str | None = None, bas: str | None = None, bit: str | None = None) -> dict | None:
+    k, kp = _tarih_kosulu(bas, bit, "s.tarih")
+    ka, kap = _tarih_kosulu(bas, bit, "a.tarih")
+    kg, kgp = _tarih_kosulu(bas, bit)
     con = sqlite3.connect(depo)
     try:
         c = pd.read_sql_query("SELECT * FROM dim_cari WHERE cari_kod = ?", con, params=(kod,))
@@ -267,14 +287,15 @@ def cari_karti(depo: str, kod: str, ay: str | None = None) -> dict | None:
         ref = int(c.iloc[0]["cari_ref"])
         s = _hazirla(_oku(con, "SELECT s.tarih, s.malzeme_ref, s.miktar, s.net_tutar, s.maliyet_tutar, s.fatura_no, s.iade, "
                                "m.malzeme_kod, m.malzeme_ad, m.grup_kod FROM fact_satis s LEFT JOIN dim_malzeme m USING (malzeme_ref) "
-                               "WHERE s.cari_ref = ?", (ref,)))
+                               "WHERE s.cari_ref = ?" + k, (ref, *kp)))
         al = _oku(con, "SELECT a.tarih, a.miktar, a.net_tutar, a.fatura_no, m.malzeme_kod, m.malzeme_ad FROM fact_alis a "
-                       "LEFT JOIN dim_malzeme m USING (malzeme_ref) WHERE a.cari_ref = ?", (ref,))
-        aylar = _tum_aylar(con)
+                       "LEFT JOIN dim_malzeme m USING (malzeme_ref) WHERE a.cari_ref = ?" + ka, (ref, *kap))
+        aylar = _tum_aylar(con, bas, bit)
         # firma geneli ortalama fiyat: bu carinin aldığı ürünlerde, diğer müşterilere satış ortalaması
         genel = pd.read_sql_query(
-            "SELECT malzeme_ref, SUM(net_tutar) t, SUM(miktar) q FROM fact_satis WHERE cari_ref <> ? AND malzeme_ref IN "
-            "(SELECT DISTINCT malzeme_ref FROM fact_satis WHERE cari_ref = ?) GROUP BY malzeme_ref", con, params=(ref, ref))
+            "SELECT malzeme_ref, SUM(net_tutar) t, SUM(miktar) q FROM fact_satis WHERE cari_ref <> ?" + kg + " AND malzeme_ref IN "
+            "(SELECT DISTINCT malzeme_ref FROM fact_satis WHERE cari_ref = ?" + kg + ") GROUP BY malzeme_ref", con,
+            params=(ref, *kgp, ref, *kgp))
         haric = False
         if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='haric'").fetchone():
             haric = con.execute("SELECT 1 FROM haric WHERE tur='cari' AND anahtar = ?", (kod,)).fetchone() is not None
@@ -361,12 +382,15 @@ def _cari_bulgulari(s, aylik, urun, toplam, aylar) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------- ay detayı
-def ay_detayi(depo: str, ay: str) -> dict | None:
+def ay_detayi(depo: str, ay: str, bas: str | None = None, bit: str | None = None) -> dict | None:
+    """Bir ayın kırılımı. Tarih filtresi yalnızca ay gezinme listesini daraltır; ayın kendisi ve önceki ay /
+    geçen yıl karşılaştırmaları her zaman tam aydır."""
     con = sqlite3.connect(depo)
     try:
         aylar = _tum_aylar(con)
         if ay not in aylar:
             return None
+        gezinme = _tum_aylar(con, bas, bit) or aylar
         i = aylar.index(ay)
         onceki = aylar[i - 1] if i > 0 else None
         gecen_yil = f"{int(ay[:4]) - 1}{ay[4:]}"
@@ -400,7 +424,8 @@ def ay_detayi(depo: str, ay: str) -> dict | None:
               "fatura": int(bu.loc[~bu["iade"].astype(bool), "fatura_no"].nunique())}
     gun = bu.groupby(bu["tarih"].dt.day)["net_tutar"].sum()
     return {"ay": ay, "ay_ad": ay_ad(ay), "cari": cari, "urun": urun, "toplam": toplam, "onceki": kiyas(onceki),
-            "gecen_yil": kiyas(gecen_yil), "aylar": aylar, "onceki_ay": onceki, "sonraki_ay": aylar[i + 1] if i + 1 < len(aylar) else None,
+            "gecen_yil": kiyas(gecen_yil), "aylar": gezinme, "onceki_ay": onceki,
+            "sonraki_ay": aylar[i + 1] if i + 1 < len(aylar) else None,
             "bas": f"{ay}-01", "bit": f"{(pd.Period(ay, freq='M').end_time):%Y-%m-%d}",
             "gunluk": [(int(g), float(v)) for g, v in gun.items()]}
 

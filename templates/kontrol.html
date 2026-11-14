@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block baslik %}Veri kontrolü — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% block icerik %}
+<style>
+  table.kt td, table.kt th { vertical-align:top; } table.kt td.n { white-space:nowrap; }
+  .fark { color:#B42318; font-weight:600; } .etki { font-size:12px; border-radius:4px; padding:1px 6px; white-space:nowrap; }
+  .etki.e-ok { background:#E7F5EA; color:#1E6B2F; } .etki.e-dikkat { background:#FDECEC; color:#8A1C1C; } .etki.e-bilgi { background:#EEF1F5; color:#4B5563; }
+  .logo-ref { font:12px ui-monospace, Menlo, Consolas, monospace; color:var(--soluk); }
+  details.eksik { border-top:1px solid #F0F1F4; padding:8px 0; } details.eksik summary { color:var(--yazi); font-size:14px; }
+  details.eksik summary b { color:var(--lacivert); }
+</style>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>Veri kontrolü</h1>
+    <div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }} · <a href="/panel/{{ aid }}">Panele dön</a></div>
+  </div>
+  <a class="btn" href="/kontrol/{{ aid }}/excel">Excel'e indir (tüm listeler)</a>
+</div>
+<p class="kucuk soluk" style="max-width:900px">Bu sayfa iki şeyi listeler: <b>Logo'nun fatura toplamıyla programın hesapladığı tutarın farklı çıktığı faturalar</b>
+  (her biri için otomatik bulunan neden) ve <b>ekranda boş, "–" ya da eski sürümlerde "nan" görünmesine yol açan eksik veriler</b>.</p>
+
+{% if k.v is none %}
+<div class="uyari" style="margin-top:10px"><b>Bu analiz eski bir sürümle oluşturulmuş; fatura dökümü yok.</b> Logo farkları için yedeği yeniden açıp analizi
+  baştan oluşturun. Eksik veri listesi aşağıda yine de var.</div>
+{% else %}
+{% set s = k.sagla %}
+<h2>Logo ile sağlama (satış faturaları{% if k.bas or k.bit %}, seçilen tarih aralığı{% endif %})</h2>
+<div class="kart" style="padding:8px 12px"><table>
+  <tr><td style="width:55%">Logo'nun fatura başlıklarındaki KDV hariç toplam <span class="kucuk soluk">(NETTOTAL − TOTALVAT, iadeler eksi)</span></td><td class="s"><b>{{ s.logo|tl(2) }} ₺</b></td></tr>
+  <tr><td>Satırlardan hesaplanan toplam <span class="kucuk soluk">(indirim/masraf satırları hariç)</span></td><td class="s">{{ s.satir|tl(2) }} ₺</td></tr>
+  <tr><td>&nbsp;&nbsp;Fark: Logo başlığı − satırlar <span class="kucuk soluk">(aşağıdaki faturalardan gelir)</span></td><td class="s {{ 'fark' if s.fark_logo_satir|abs > fark_esik }}">{{ s.fark_logo_satir|tl(2) }} ₺</td></tr>
+  <tr><td>&nbsp;&nbsp;Analize alınmayan satırlar <span class="kucuk soluk">(iptal satırı, konsinye, hizmet…)</span></td><td class="s">−{{ s.disarida|tl(2) }} ₺</td></tr>
+  <tr><td>&nbsp;&nbsp;Hesaplama dışı bırakılan faturalar</td><td class="s">−{{ s.haric|tl(2) }} ₺</td></tr>
+  <tr><td><b>Programdaki net satış</b> <span class="kucuk soluk">({{ s.fatura|tl }} fatura)</span></td><td class="s"><b>{{ s.analiz|tl(2) }} ₺</b></td></tr>
+</table>
+{% if s.logo_bos %}<p class="kucuk soluk" style="margin:8px">{{ s.logo_bos }} faturada Logo genel toplamı boş; bu faturalarda Logo tutarı yerine satır toplamı kullanıldı (aşağıda "Eksik ya da boş veriler" altında listelenir).</p>{% endif %}
+</div>
+
+<h2 id="farklar">Logo ile farklı faturalar <span class="soluk kucuk">({{ k.farklar|length }} fatura · farkı {{ fark_esik|tl }} ₺'den büyük olanlar)</span></h2>
+{% if k.farklar|length == 0 %}
+<div class="kart"><p style="margin:0">Logo'nun fatura toplamıyla farklı çıkan fatura yok. ✓</p></div>
+{% else %}
+<div class="kart" style="padding:8px 12px">
+  <h3 style="margin:6px 8px">Nedenlerine göre</h3>
+  <table class="kt">
+    <tr><th>Neden</th><th class="s">Fatura</th><th class="s">Toplam fark</th><th>Analize etkisi</th><th>Açıklama</th></tr>
+    {% for r in k.ozet.itertuples() %}
+    <tr><td><b>{{ r.neden }}</b></td><td class="s">{{ r.fatura|tl }}</td><td class="s">{{ r.toplam_fark|tl(2) }} ₺</td>
+        <td><span class="etki {{ 'e-ok' if r.etki in ('Etkisi yok','Program doğru','Bilerek dışarıda','Önemsiz') else ('e-dikkat' if r.etki in ('Ciroda eksik','Ciro fazla') else 'e-bilgi') }}">{{ r.etki }}</span></td>
+        <td class="kucuk">{{ r.neden_aciklama }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="kart" style="padding:8px 12px;margin-top:16px;overflow-x:auto">
+  <h3 style="margin:6px 8px">Fatura fatura <span class="soluk kucuk" style="font-weight:400">(farkı büyükten küçüğe; faturaya tıklayınca satırları açılır)</span></h3>
+  <table class="kt">
+    <tr><th>Tarih</th><th>Fatura</th><th>Cari</th><th class="s">Logo KDV hariç</th><th class="s">Satırlar</th><th class="s">Fark</th><th>Neden</th><th>Logo'da</th></tr>
+    {% for r in k.farklar.head(500).itertuples() %}
+    <tr><td class="n">{{ r.tarih.strftime('%d.%m.%Y') if r.tarih == r.tarih else '' }}</td>
+        <td class="n"><a href="/fatura/{{ aid }}?d={{ r.donem|urlencode }}&r={{ r.fatura_ref }}">{{ r.fatura_no }}</a><div class="kucuk soluk">{{ r.tur }}</div></td>
+        <td>{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td>
+        <td class="s">{{ r.logo_matrah|tl(2) }}</td><td class="s">{{ r.kontrol_tutar|tl(2) }}</td><td class="s fark">{{ r.fark|tl(2) }}</td>
+        <td><b>{{ r.neden }}</b>{% if r.hesap %}<div class="kucuk soluk">{{ r.hesap }}</div>{% endif %}</td>
+        <td class="logo-ref">{{ r.logo_tablo }}<br>LOGICALREF {{ r.fatura_ref }}</td></tr>
+    {% endfor %}
+  </table>
+  {% if k.farklar|length > 500 %}<p class="kucuk soluk" style="margin:8px">İlk 500 fatura; tamamı Excel'de.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if k.disarida is not none and k.disarida|length %}
+<h2>Analize alınmayan fatura satırları</h2>
+<div class="kart" style="padding:8px 12px"><table>
+  <tr><th>Neden</th><th class="s">Satır</th><th class="s">Fatura</th><th class="s">Tutar</th></tr>
+  {% for r in k.disarida.itertuples() %}
+  <tr><td>{{ r.durum }}</td><td class="s">{{ r.satir|tl }}</td><td class="s">{{ r.fatura|tl }}</td><td class="s">{{ r.tutar|tl(2) }} ₺</td></tr>
+  {% endfor %}
+</table>
+<p class="kucuk soluk" style="margin:8px">Bunlar bilerek ciroya katılmaz (iptal satırları, indirim/masraf satırları, satış/alış dışı hareketler).
+  <a href="/faturalar/{{ aid }}?durum=disarida">Bu faturaları listele ›</a></p></div>
+{% endif %}
+{% endif %}
+
+<h2 id="eksik">Eksik ya da boş veriler <span class="soluk kucuk">({{ k.eksik|length }} konu)</span></h2>
+<div class="kart" style="padding:4px 16px">
+  {% for e in k.eksik %}
+  <details class="eksik">
+    <summary><b>{{ e.baslik }}</b> — {{ e.adet|tl }} {{ e.birim }}{% if e.tutar is not none and e.tutar|abs > 0.005 %} · {{ e.tutar|tl }} ₺{% if e.pay is not none %} (cironun {{ e.pay|yuzde }}){% endif %}{% endif %}</summary>
+    <p class="kucuk" style="margin:8px 0 4px"><b>Neden:</b> {{ e.aciklama }}</p>
+    <p class="kucuk" style="margin:0 0 8px"><b>Ekranda:</b> {{ e.etki }}</p>
+    {% if e.ornek|length %}<div style="overflow-x:auto"><table>
+      <tr>{% for c in e.ornek.columns %}<th class="{{ 's' if c in ('tutar','satir','miktar','stok_miktar') }}">{{ c.replace('_', ' ')|capitalize }}</th>{% endfor %}</tr>
+      {% for row in e.ornek.head(30).itertuples(index=False) %}<tr>
+        {% for c, x in zip(e.ornek.columns, row) %}<td class="{{ 's' if c in ('tutar','satir','miktar','stok_miktar') }}">{% if c in ('tutar','stok_miktar','miktar') %}{{ x|tl(2) }}{% elif c == 'malzeme_kod' and x %}<a href="/urun/{{ aid }}?kod={{ x|urlencode }}">{{ x }}</a>{% elif c == 'cari_kod' and x %}<a href="/cari/{{ aid }}?kod={{ x|urlencode }}">{{ x }}</a>{% else %}{{ x }}{% endif %}</td>{% endfor %}
+      </tr>{% endfor %}
+    </table></div>
+    {% if e.ornek|length > 30 %}<p class="kucuk soluk">İlk 30 kayıt; tamamı Excel'de.</p>{% endif %}{% endif %}
+  </details>
+  {% else %}<p>Eksik ya da boş veri bulunmadı. ✓</p>{% endfor %}
+</div>
+{% endblock %}

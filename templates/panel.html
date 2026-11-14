@@ -15,6 +15,7 @@
     <button class="btn ikincil" id="pbi-btn" title="Hazır raporu Power BI Desktop ile açar (Windows)">Power BI raporu aç</button>
     <a class="btn ikincil" href="/indir/{{ aid }}/powerbi" title="Hazır rapor + CSV dosyaları (zip)">Power BI paketi</a>
     <a class="btn ikincil" href="/indir/{{ aid }}/yzpaket" title="ChatGPT, Claude veya Gemini sohbetine sürükleyin">Yapay zekâ paketi</a>
+    <a class="btn ikincil" href="/kontrol/{{ aid }}" title="Logo ile farklı faturalar ve boş/eksik veriler, nedenleriyle">Veri kontrolü{% if kontrol and (kontrol.fark or kontrol.eksik) %} ({{ (kontrol.fark or 0) + kontrol.eksik|length }}){% endif %}</a>
     {% if fatura_var %}<a class="btn ikincil" href="/haric/{{ aid }}" title="Bazı carileri ya da faturaları hesaplamalardan çıkarın">Hesaplama dışı{% if haric_say[0] + haric_say[1] %} ({{ haric_say[0] + haric_say[1] }}){% endif %}</a>{% endif %}
     {% if kaynak_acik %}<a class="btn ikincil" href="/firmalar">Başka firma</a>{% endif %}
   </div>
@@ -39,6 +40,15 @@
   <a href="/panel/{{ aid }}">Tüm ambarlara dön</a></div>
 {% endif %}
 <div id="pbi-durum" class="uyari" style="margin-top:14px;display:none"></div>
+{% if kontrol and (kontrol.fark or kontrol.eksik) %}
+<div class="uyari" style="margin-top:14px;border-color:#F3C7C7;background:#FFF8F8;color:var(--yazi)">
+  <b>Veri kontrolü:</b>
+  {% if kontrol.fark %}<a href="/kontrol/{{ aid }}#farklar"><b>{{ kontrol.fark }} fatura Logo'nun toplamıyla farklı</b></a>
+    ({% for neden, n in kontrol.nedenler[:4] %}{{ neden }}: {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}{% if kontrol.nedenler|length > 4 %} · …{% endif %}).{% endif %}
+  {% if kontrol.eksik %}<a href="/kontrol/{{ aid }}#eksik">{{ kontrol.eksik|length }} türde eksik/boş veri</a>:
+    {% for b, n, birim in kontrol.eksik[:4] %}{{ b|lower }} ({{ n|tl }} {{ birim }}){% if not loop.last %}, {% endif %}{% endfor %}{% if kontrol.eksik|length > 4 %}, …{% endif %}.{% endif %}
+  <a class="btn kucuk" style="margin-left:6px" href="/kontrol/{{ aid }}">Listeyi aç</a></div>
+{% endif %}
 {% if bilgi.uyari %}<div class="uyari" style="margin-top:14px"><b>Dikkat:</b> {{ bilgi.uyari }}</div>{% endif %}
 {% if not fatura_var %}<div class="uyari" style="margin-top:14px;border-width:2px">
   <b>Bu analiz programın eski bir sürümüyle oluşturulmuş.</b> Bu yüzden şunlar burada çalışmaz: toplamların fatura fatura dökümü,

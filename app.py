@@ -154,13 +154,108 @@ def _analizler():
     return out
 
 
+_ONARILAN: set = set()
+
+
 def _analiz_klasor(aid):
     if not re.fullmatch(r"[A-Za-z0-9_\-]+", aid or ""):
         abort(404)
     yol = os.path.join(CALISMA, aid)
-    if not os.path.exists(os.path.join(yol, "analiz.sqlite")):
+    depo = os.path.join(yol, "analiz.sqlite")
+    if not os.path.exists(depo):
         abort(404)
+    if depo not in _ONARILAN:   # kartı yedekte olmayan cari/malzemelere ad ver (listelerde "nan" yerine)
+        _ONARILAN.add(depo)
+        from core.kontrol import kartsiz_onar
+        try:
+            n = kartsiz_onar(depo)
+            if n["cari"] or n["malzeme"]:
+                tanilama.yaz(f"Kartı olmayan {n['cari']} cari ve {n['malzeme']} malzeme için yer tutucu kart eklendi.")
+        except Exception as e:  # onarım yapılamazsa sayfa yine açılsın
+            tanilama.yaz(f"Kartsız kayıt onarımı yapılamadı: {e}")
     return yol
+
+
+# ---------------------------------------------------------------------------- tarih filtresi (analiz başına, tüm ekranlar)
+def _tarih_yolu(klasor):
+    return os.path.join(klasor, "tarih_filtresi.json")
+
+
+def _tarih_gecerli(v):
+    v = (v or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+        return None
+    try:
+        dt.date.fromisoformat(v)
+    except ValueError:
+        return None
+    return v
+
+
+def _tarih(klasor) -> tuple:
+    """(bas, bit) 'YYYY-MM-DD' ya da None. Seçilen aralık analiz klasöründe saklanır; bütün ekranlar, Excel, PDF,
+    Power BI ve yapay zekâ aynı aralığı kullanır."""
+    try:
+        with open(_tarih_yolu(klasor), encoding="utf-8") as fh:
+            d = json.load(fh)
+        return _tarih_gecerli(d.get("bas")), _tarih_gecerli(d.get("bit"))
+    except (OSError, ValueError, AttributeError):
+        return None, None
+
+
+def _tarih_hazir(bilgi):
+    """Hızlı seçimler: verinin son tarihine göre (bugüne göre değil)."""
+    try:
+        ilk = dt.date.fromisoformat(str(bilgi.get("tarih_bas"))[:10])
+        son = dt.date.fromisoformat(str(bilgi.get("tarih_bit"))[:10])
+    except ValueError:
+        return []
+    import pandas as pd
+    out = []
+    for y in range(ilk.year, son.year + 1):
+        out.append((str(y), str(max(ilk, dt.date(y, 1, 1))), str(min(son, dt.date(y, 12, 31)))))
+    for ad, ay in (("Son 12 ay", 12), ("Son 6 ay", 6), ("Son 3 ay", 3)):
+        b = (pd.Timestamp(son) - pd.DateOffset(months=ay) + pd.Timedelta(days=1)).date()
+        if b > ilk:
+            out.append((ad, str(b), str(son)))
+    ay_bas = son.replace(day=1)
+    out.append((f"{detay_ay_ad(son)} (son ay)", str(max(ilk, ay_bas)), str(son)))
+    ceyrek_bas = dt.date(son.year, 3 * ((son.month - 1) // 3) + 1, 1)
+    if ceyrek_bas > ilk:
+        out.append((f"{son.year} Ç{(son.month - 1) // 3 + 1}", str(ceyrek_bas), str(son)))
+    return out
+
+
+def detay_ay_ad(g):
+    from core.detay import AYLAR
+    return f"{AYLAR[g.month - 1]} {g.year}"
+
+
+@app.route("/tarih/<aid>", methods=["POST"])
+def tarih_sec(aid):
+    klasor = _analiz_klasor(aid)
+    if request.form.get("aralik"):
+        bas, _, bit = request.form["aralik"].partition("|")
+    elif request.form.get("temizle"):
+        bas = bit = ""
+    else:
+        bas, bit = request.form.get("bas", ""), request.form.get("bit", "")
+    bas, bit = _tarih_gecerli(bas), _tarih_gecerli(bit)
+    if bas and bit and bas > bit:
+        bas, bit = bit, bas
+    if bas or bit:
+        with open(_tarih_yolu(klasor), "w", encoding="utf-8") as fh:
+            json.dump({"bas": bas, "bit": bit}, fh)
+    elif os.path.exists(_tarih_yolu(klasor)):
+        os.remove(_tarih_yolu(klasor))
+    donus = request.form.get("donus") or f"/panel/{aid}"
+    if not donus.startswith("/") or donus.startswith("//"):
+        donus = f"/panel/{aid}"
+    # sayfanın kendi bas/bit/sayfa parametreleri (Faturalar) yeni genel aralığı ezmesin
+    from urllib.parse import parse_qsl, urlencode, urlsplit
+    u = urlsplit(donus)
+    q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k not in ("bas", "bit", "sayfa", "ay")]
+    return redirect(u.path + ("?" + urlencode(q) if q else ""))
 
 
 # ---------------------------------------------------------------------------- sayfalar
@@ -453,11 +548,12 @@ def _ambar_param():
     return int(v)
 
 
-def _analiz_ac(aid, ambar=None):
+def _analiz_ac(aid, ambar=None, tarihli=True):
     klasor = _analiz_klasor(aid)
     with open(os.path.join(klasor, "bilgi.json"), encoding="utf-8") as fh:
         bilgi = json.load(fh)
-    a = Analiz(os.path.join(klasor, "analiz.sqlite"), ambar=ambar)
+    bas, bit = _tarih(klasor) if tarihli else (None, None)
+    a = Analiz(os.path.join(klasor, "analiz.sqlite"), ambar=ambar, bas=bas, bit=bit)
     if ambar is not None and ambar not in {x["no"] for x in a.ambarlar}:
         abort(404)
     return klasor, bilgi, a
@@ -502,7 +598,25 @@ def panel(aid):
         musteri=(km if olcut == "kar" else m).head(15), olu=olu.head(15), olu_say=len(olu), olu_deger=float(olu["tahmini_deger"].sum()),
         grup=a.grup_satis(), grafik=_grafik_aylik(trend), esik=esik,
         kaynak_acik=bool(DURUM["firmalar"]), yz_hazir=yz.hazir_mi(), yz_ayar=yz.ayar(), fatura_var=_fatura_var(a),
-        yorum_html=_kayitli_yorum(klasor), gecmis=[(g["soru"], yz.md_html(g["cevap"])) for g in GECMIS.get(aid, [])])
+        yorum_html=_kayitli_yorum(klasor), gecmis=[(g["soru"], yz.md_html(g["cevap"])) for g in GECMIS.get(aid, [])],
+        kontrol=_kontrol_ozeti(aid, klasor, a))
+
+
+def _kontrol_ozeti(aid, klasor, a):
+    """Panelin üstündeki 'Veri kontrolü' kutusu: Logo ile farklı fatura sayısı ve eksik veri türleri."""
+    from core import fatura, kontrol
+    try:
+        bas, bit = a.tarih_filtre or (None, None)
+        v = fatura.veri(os.path.join(klasor, "analiz.sqlite"))
+        farklar = kontrol.logo_farklari(v, bas, bit) if v is not None else None
+        eksik = kontrol.eksik_veriler(os.path.join(klasor, "analiz.sqlite"), bas, bit, ornek=0)
+    except Exception as e:  # kontrol hesaplanamazsa panel yine açılsın
+        tanilama.yaz(f"Veri kontrolü özeti hesaplanamadı: {e}")
+        return None
+    return {"fark": None if farklar is None else int(len(farklar)),
+            "fark_tutar": None if farklar is None else float(farklar["fark"].abs().sum()),
+            "nedenler": [] if farklar is None else list(kontrol.fark_ozeti(farklar)[["neden", "fatura"]].itertuples(index=False)),
+            "eksik": [(e["baslik"], e["adet"], e["birim"]) for e in eksik]}
 
 
 # ---------------------------------------------------------------------------- faturalar ve tam ABC listesi
@@ -523,8 +637,21 @@ def _fatura_var(a):
 
 def _fatura_verisi(aid):
     from core import fatura
-    klasor, bilgi, _ = _analiz_ac(aid)
+    klasor, bilgi, _ = _depo(aid)
     return klasor, bilgi, fatura.veri(os.path.join(klasor, "analiz.sqlite"))
+
+
+def _tarihli_args(klasor):
+    """Faturalar ekranı: adreste tarih yoksa genel tarih filtresi uygulanır (panel toplamıyla aynı faturalar)."""
+    from werkzeug.datastructures import MultiDict
+    args_ = MultiDict(request.args)
+    if "bas" not in args_ and "bit" not in args_:
+        bas, bit = _tarih(klasor)
+        if bas:
+            args_["bas"] = bas
+        if bit:
+            args_["bit"] = bit
+    return args_
 
 
 @app.route("/faturalar/<aid>")
@@ -533,7 +660,8 @@ def faturalar_sayfa(aid):
     klasor, bilgi, v = _fatura_verisi(aid)
     if v is None:
         return render_template("faturalar.html", aid=aid, bilgi=bilgi, v=None)
-    fl = fatura.Filtre.istekten(request.args)
+    args_ = _tarihli_args(klasor)
+    fl = fatura.Filtre.istekten(args_)
     f, urun_s = fatura.suz(v, fl)
     try:
         sayfa = max(1, int(request.args.get("sayfa", 1)))
@@ -541,7 +669,7 @@ def faturalar_sayfa(aid):
         sayfa = 1
     sayfa_say = max(1, -(-len(f) // SAYFA_BOYU))
     sayfa = min(sayfa, sayfa_say)
-    args = request.args.to_dict(flat=False)
+    args = args_.to_dict(flat=False)
 
     def url(**degis):
         q = {k: v for k, v in args.items() if k not in degis}
@@ -558,7 +686,7 @@ def faturalar_sayfa(aid):
     return render_template("faturalar.html", aid=aid, bilgi=bilgi, v=v, fl=fl, tur_grup=fatura.TUR_GRUP,
                            f=f.iloc[(sayfa - 1) * SAYFA_BOYU: sayfa * SAYFA_BOYU], o=fatura.ozet(f, urun_s),
                            sayfa=sayfa, sayfa_say=sayfa_say, url=url, sirala_url=sirala_url, fark_esik=fatura.FARK_ESIK,
-                           excel_url=f"/faturalar/{aid}/excel?" + request.query_string.decode(),
+                           excel_url=url(sayfa=None).replace(f"/faturalar/{aid}?", f"/faturalar/{aid}/excel?", 1),
                            sorgu=url(hata=None, sayfa=None).split("?", 1)[1], buraya=url(hata=None), hata=request.args.get("hata"),
                            toplu_ekle=int((~f["iptal"] & ~f["haric"]).sum()), toplu_geri=int((f["haric"] & ~f["iptal"] & (f["haric_neden"] == "Fatura hariç tutuldu")).sum()))
 
@@ -569,7 +697,7 @@ def faturalar_excel(aid):
     klasor, bilgi, v = _fatura_verisi(aid)
     if v is None:
         abort(404)
-    fl = fatura.Filtre.istekten(request.args)
+    fl = fatura.Filtre.istekten(_tarihli_args(klasor))
     f, _ = fatura.suz(v, fl)
     yol = os.path.join(klasor, f"Faturalar_{re.sub(r'[^0-9A-Za-z-]', '', str(bilgi['firma']))}.xlsx")
     fatura.excel_indir(v, f, yol, "Filtreli liste." if fl.aktif_mi() else "Tüm faturalar.")
@@ -589,7 +717,9 @@ def fatura_sayfa(aid):
     if sonuc is None:
         abort(404)
     bas, satirlar = sonuc
+    from core import kontrol
     return render_template("fatura.html", aid=aid, bilgi=bilgi, f=bas, satirlar=satirlar, fark_esik=fatura.FARK_ESIK,
+                           neden=kontrol.fatura_nedeni(v, bas),
                            buraya=request.full_path.rstrip("?"),
                            geri=request.referrer if request.referrer and "/faturalar/" in request.referrer else f"/faturalar/{aid}")
 
@@ -628,7 +758,7 @@ def _ay_param():
 def urun_karti(aid):
     from core import detay
     klasor, bilgi, depo = _depo(aid)
-    k = detay.urun_karti(depo, request.args.get("kod", ""), _ay_param())
+    k = detay.urun_karti(depo, request.args.get("kod", ""), _ay_param(), *_tarih(klasor))
     if k is None:
         abort(404)
     return render_template("urun.html", aid=aid, bilgi=bilgi, k=k, kod=k["m"]["malzeme_kod"], ay_ad=detay.ay_ad,
@@ -639,7 +769,7 @@ def urun_karti(aid):
 def cari_karti(aid):
     from core import detay, haric
     klasor, bilgi, depo = _depo(aid)
-    k = detay.cari_karti(depo, request.args.get("kod", ""), _ay_param())
+    k = detay.cari_karti(depo, request.args.get("kod", ""), _ay_param(), *_tarih(klasor))
     if k is None:
         abort(404)
     alacak = None
@@ -663,7 +793,7 @@ def cari_karti(aid):
 def ay_sayfa(aid):
     from core import detay
     klasor, bilgi, depo = _depo(aid)
-    k = detay.ay_detayi(depo, _ay_param() or "")
+    k = detay.ay_detayi(depo, _ay_param() or "", *_tarih(klasor))
     if k is None:
         abort(404)
     return render_template("ay.html", aid=aid, bilgi=bilgi, k=k, ay_ad=detay.ay_ad, fatura_var=_fatura_verisi(aid)[2] is not None)
@@ -675,6 +805,42 @@ def ara_sayfa(aid):
     klasor, bilgi, depo = _depo(aid)
     q = (request.args.get("q") or "").strip()
     return render_template("ara.html", aid=aid, bilgi=bilgi, q=q, s=detay.ara(depo, q))
+
+
+# ---------------------------------------------------------------------------- veri kontrolü (Logo farkları, eksik veriler)
+def _kontrol_verisi(aid):
+    from core import fatura, kontrol
+    klasor, bilgi, depo = _depo(aid)
+    bas, bit = _tarih(klasor)
+    v = fatura.veri(depo)
+    farklar = kontrol.logo_farklari(v, bas, bit) if v is not None else None
+    return {"klasor": klasor, "bilgi": bilgi, "v": v, "bas": bas, "bit": bit, "farklar": farklar,
+            "ozet": kontrol.fark_ozeti(farklar) if farklar is not None else None,
+            "disarida": kontrol.disarida_ozeti(v, bas, bit) if v is not None else None,
+            "sagla": kontrol.sagla(v, bas, bit) if v is not None else None,
+            "eksik": kontrol.eksik_veriler(depo, bas, bit)}
+
+
+@app.route("/kontrol/<aid>")
+def kontrol_sayfa(aid):
+    k = _kontrol_verisi(aid)
+    return render_template("kontrol.html", aid=aid, bilgi=k["bilgi"], k=k, fark_esik=1.0)
+
+
+@app.route("/kontrol/<aid>/excel")
+def kontrol_excel(aid):
+    from core import kontrol
+    import pandas as pd
+    k = _kontrol_verisi(aid)
+    bos = pd.DataFrame(columns=["tarih", "fatura_no", "belge_no", "tur", "cari_kod", "cari_ad", "logo_matrah", "kontrol_tutar",
+                                "analiz_tutar", "fark", "neden", "hesap", "etki", "logo_tablo", "fatura_ref"])
+    aralik = (f" Tarih filtresi: {k['bas'] or '…'} – {k['bit'] or '…'}." if (k["bas"] or k["bit"]) else "")
+    yol = os.path.join(k["klasor"], f"Veri_Kontrolu_{re.sub(r'[^0-9A-Za-z-]', '', str(k['bilgi']['firma']))}.xlsx")
+    kontrol.excel(yol, k["farklar"] if k["farklar"] is not None else bos,
+                  k["ozet"] if k["ozet"] is not None else kontrol.fark_ozeti(bos),
+                  k["eksik"], k["disarida"] if k["disarida"] is not None else pd.DataFrame(columns=["durum", "satir", "fatura", "tutar"]),
+                  f"{k['bilgi'].get('firma')} {k['bilgi'].get('firma_ad') or ''}.{aralik} Oluşturma: {dt.datetime.now():%d.%m.%Y %H:%M}")
+    return send_file(yol, as_attachment=True)
 
 
 # ---------------------------------------------------------------------------- hesaplama dışı bırakma
@@ -919,6 +1085,51 @@ def sil(aid):
 @app.context_processor
 def _surum():
     return {"surum": __version__}
+
+
+# tarih filtresi çubuğunun göründüğü sayfalar
+_TARIHLI = {"panel", "abc_liste", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "kontrol_sayfa"}
+
+
+@app.context_processor
+def _tarih_cubugu():
+    if request.endpoint not in _TARIHLI or not (request.view_args or {}).get("aid"):
+        return {}
+    aid = request.view_args["aid"]
+    try:
+        klasor = _analiz_klasor(aid)
+        with open(os.path.join(klasor, "bilgi.json"), encoding="utf-8") as fh:
+            bilgi = json.load(fh)
+    except Exception:
+        return {}
+    bas, bit = _tarih(klasor)
+    g = lambda v: f"{dt.date.fromisoformat(v):%d.%m.%Y}" if v else "…"  # noqa: E731
+    return {"tf": {"aid": aid, "bas": bas or "", "bit": bit or "", "aktif": bool(bas or bit),
+                   "etiket": f"{g(bas)} – {g(bit)}" if (bas or bit) else "",
+                   "veri_bas": str(bilgi.get("tarih_bas") or "")[:10], "veri_bit": str(bilgi.get("tarih_bit") or "")[:10],
+                   "hazir": _tarih_hazir(bilgi), "donus": request.full_path.rstrip("?"),
+                   "faturalar": request.endpoint == "faturalar_sayfa"}}
+
+
+def _bos_degil(v):
+    """Şablonda None / NaN / NaT 'None' ya da 'nan' diye yazılmasın: boş bırakılır."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v != v:
+        return ""
+    if type(v).__name__ in ("NaTType", "NAType"):
+        return ""
+    try:
+        import numpy as np
+        if isinstance(v, np.floating) and np.isnan(v):
+            return ""
+    except Exception:
+        pass
+    return v
+
+
+app.jinja_env.finalize = _bos_degil
+app.jinja_env.globals["zip"] = zip
 
 
 @app.template_filter("tl")

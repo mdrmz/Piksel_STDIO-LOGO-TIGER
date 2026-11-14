@@ -1,5 +1,32 @@
 # Değişiklik günlüğü
 
+## v0.9.0 — 2026-11-14
+Tüm ekranlarda tarih filtresi, Logo ile farklı faturaların nedeni, "nan" görünen yerlerin temizlenmesi.
+- **Tarih filtresi (her ekranda):** sayfanın üstündeki çubuktan başlangıç–bitiş tarihi seçilir ya da hızlı düğmelerle
+  (yıllar, son 12 / 6 / 3 ay, son ay, son çeyrek) bir kez seçilir; panel, ABC listeleri, ürün ve cari kartları,
+  Faturalar, Veri kontrolü, Excel raporu, PDF özet, Power BI paketi ve yapay zekâ aynı aralığı kullanır. Seçim analizle
+  birlikte saklanır; **Tüm tarihler** ile kaldırılır. Stok ve cari bakiye/alacak son durumdur (süzülmez). Müşteri kaybı,
+  ölü stok ve sipariş önerisi bitiş tarihine kadarki geçmişe bakar. "Geçen yılın aynı dönemi" karşılaştırması seçilen
+  aralığın bir yıl öncesiyle yapılır; veri o dönemi kapsamıyorsa yanıltıcı olmasın diye gösterilmez.
+- **Veri kontrolü sayfası** (panelde **Veri kontrolü** düğmesi ve uyarı kutusu):
+  - **Logo ile farklı faturalar** ve her birinin otomatik bulunan nedeni: masraf satırı, iptal edilmiş satır, dağıtılmamış
+    dip indirim, KDV tevkifatı (oranıyla), ek vergi, satırı yedekte olmayan fatura, yuvarlama ya da "açıklanamadı".
+    Her nedenin analize etkisi (ör. "Etkisi yok", "Ciroda eksik") yazar. Fatura detayında da neden gösterilir.
+  - **Logo ile sağlama köprüsü:** Logo başlık toplamı → satır toplamı → analize alınmayan satırlar → hesaplama dışı →
+    programdaki net satış.
+  - **Eksik / boş veriler:** carisi seçilmemiş (perakende/kasa) satışlar, kartı yedekte olmayan cari ve malzemeler,
+    maliyeti bulunamayan satışlar, miktarı 0 olan satırlar, tarihi okunamayan satırlar, grubu/şehri boş kartlar,
+    temsilcisi atanmamış satışlar, Logo toplamı boş faturalar, eksi stok, adı tanımsız ambar. Her biri için adet,
+    tutar, ekranda neye yol açtığı ve kayıtların listesi. Hepsi tek Excel dosyasına iner.
+- **"nan" düzeltmesi:** Logo'da cari seçilmeden kesilen (perakende) faturalar ve kartı silinmiş cari/malzemeler
+  listelerde ad, şehir ve grup yerine "nan" yazdırıyordu. Artık "(Cari seçilmemiş — perakende/kasa satışı)",
+  "(Cari kartı yedekte yok — Logo ref N)" gibi açıklayıcı adlarla görünür, kartları açılır. Boş sayısal alanlar
+  (ör. maliyeti bilinmeyen üründe marj) hiçbir ekranda "nan" / "None" yazmaz, boş kalır. Önceki analizler de açılırken
+  kendiliğinden düzelir.
+- Yeni analizlerde fatura başlığındaki masraf (`TOTALEXPENSES`) ve ek vergi (`TOTALADDTAX`) toplamları da okunur;
+  Logo farkının nedeni daha kesin bulunur.
+- Veri notlarında "Faturalanmamış irsaliye satırı: None" yerine ayarın ne olduğu yazıyor.
+
 ## v0.8.3 — 2026-11-14
 - Eski sürümle (v0.7.0 öncesi) oluşturulmuş analizlerde fatura dökümü, Faturalar ekranı ve hesaplama dışı bırakma
   sessizce gizleniyordu. Artık panelde bunun nedeni ve çözümü (yedeği yeniden açıp analizi baştan oluşturmak) açıkça

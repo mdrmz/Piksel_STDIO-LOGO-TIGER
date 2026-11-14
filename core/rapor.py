@@ -184,6 +184,8 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
         ws = wb.add_worksheet("Özet")
         ws.set_column(0, 0, 34); ws.set_column(1, 1, 22)
         ambar = f" — yalnızca {a.ambar_secili_ad}" if getattr(a, "ambar_secili", None) is not None else ""
+        if getattr(a, "tarih_filtre", None):
+            ambar += f" — {a.tarih_etiketi()}"
         ws.write(0, 0, f"{m.get('firma_ad') or 'Firma ' + m.get('firma', '')}{ambar} — Satış ve Stok Analizi", f["h1"])
         ws.write(1, 0, f"Dönem: {o['tarih_bas']} – {o['tarih_bit']}   ·   Rapor tarihi: {dt.date.today():%d.%m.%Y}", f["not"])
         satirlar = [
@@ -361,10 +363,12 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
         from . import fatura as fat
         if fat.var_mi(a.con):
             v = fat.yukle(a.con)
-            fl = fat.Filtre(ambar=a.ambar_secili)
+            tf = getattr(a, "tarih_filtre", None) or (None, None)
+            fl = fat.Filtre(ambar=a.ambar_secili, bas=tf[0] or "", bit=tf[1] or "")
             fs, _ = fat.suz(v, fl)
-            fat.excel_sayfalari(wb, v, fs, f"{a.ambar_secili_ad} ambarı." if a.ambar_secili is not None else "",
-                                satir_siniri=RAPOR_SATIR_SINIRI)
+            not_ = (f"{a.ambar_secili_ad} ambarı. " if a.ambar_secili is not None else "") + \
+                   (f"Tarih: {a.tarih_etiketi()}." if getattr(a, "tarih_filtre", None) else "")
+            fat.excel_sayfalari(wb, v, fs, not_.strip(), satir_siniri=RAPOR_SATIR_SINIRI)
 
         for sayfa in wb.worksheets():   # yazdırma: yatay, sayfa genişliğine sığdır
             sayfa.set_landscape()
@@ -437,6 +441,10 @@ def powerbi_disa_aktar(a: Analiz, depo: str, klasor: str, olu_stok_gun: int = 90
         if t not in var:   # eski sürümle oluşturulmuş analiz
             continue
         df = pd.read_sql_query(f"SELECT * FROM {t}", con)
+        tf = getattr(a, "tarih_filtre", None)
+        if tf and t in ("fact_satis", "fact_alis", "dim_tarih"):   # panelde seçilen tarih aralığı Power BI'a da uygulanır
+            from .analiz import tarih_maskesi
+            df = df[tarih_maskesi(pd.to_datetime(df["tarih"], errors="coerce"), tf[0], tf[1])]
         for c in ("tarih", "son_giris_tarih"):
             if c in df.columns:
                 df[c] = pd.to_datetime(df[c]).dt.strftime("%Y-%m-%d")

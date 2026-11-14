@@ -53,10 +53,35 @@ def _bir_kez(fn):
     return sarili
 
 
+def tarih_araligi(bas: str | None, bit: str | None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """'YYYY-MM-DD' metinleri -> (başlangıç günü 00:00, bitiş gününün ertesi 00:00). Boş/geçersiz olan None."""
+    def gun(v):
+        t = pd.to_datetime(v or None, errors="coerce", format="%Y-%m-%d")
+        return None if t is None or pd.isna(t) else t.normalize()
+    b, s = gun(bas), gun(bit)
+    if b is not None and s is not None and b > s:
+        b, s = s, b
+    return b, (s + pd.Timedelta(days=1) if s is not None else None)
+
+
+def tarih_maskesi(seri: pd.Series, bas: str | None, bit: str | None) -> pd.Series:
+    """Tarihi [bas, bit] (iki uç dahil) aralığında olan satırlar. Tarihi boş satırlar filtre varken dışarıda kalır."""
+    b, s = tarih_araligi(bas, bit)
+    m = pd.Series(True, index=seri.index)
+    if b is not None:
+        m &= seri >= b
+    if s is not None:
+        m &= seri < s
+    return m
+
+
 class Analiz:
-    def __init__(self, depo: str, ambar: int | None = None):
+    def __init__(self, depo: str, ambar: int | None = None, bas: str | None = None, bit: str | None = None):
         """ambar: verilirse satış, alış ve stok yalnızca o ambara göre süzülür (ör. sadece MERKEZ DEPO).
-        Cari bakiye/alacak ambara bağlı değildir; süzülmez."""
+        Cari bakiye/alacak ambara bağlı değildir; süzülmez.
+        bas/bit ('YYYY-MM-DD'): verilirse satış ve alış bu tarih aralığına süzülür (iki uç dahil). Stok ve cari
+        bakiye o anki son durumdur, süzülmez. Müşteri kaybı, ölü stok ve sipariş önerisi bitiş tarihine kadarki
+        geçmişe bakar; "geçen yıl" karşılaştırmaları süzülmemiş veriden, seçilen aralığın bir yıl öncesiyle yapılır."""
         self._onbellek: dict = {}
         self.con = sqlite3.connect(depo)
         q = lambda s: pd.read_sql_query(s, self.con)
@@ -99,6 +124,28 @@ class Analiz:
             self.alis = self.alis[self.alis["ambar"] == n].reset_index(drop=True)
             self.stok_ambar = self.stok_ambar[self.stok_ambar["ambar"] == n].reset_index(drop=True)
             self.stok = self.stok_ambar.groupby("malzeme_ref", as_index=False)["stok_miktar"].sum()
+        # tarih filtresi
+        self.satis_tum = self.satis          # ambara göre süzülmüş, tarihe göre süzülmemiş (geçen yıl kıyası)
+        self.satis_gecmis = self.satis       # bitiş tarihine kadarki tüm satışlar (müşteri kaybı, ölü stok, sipariş)
+        b, s = tarih_araligi(bas, bit)
+        self.tarih_filtre = None
+        if b is not None or s is not None:
+            self.tarih_filtre = (str(b.date()) if b is not None else None,
+                                 str((s - pd.Timedelta(days=1)).date()) if s is not None else None)
+            self.satis = self.satis[tarih_maskesi(self.satis["tarih"], bas, bit)].reset_index(drop=True)
+            self.alis = self.alis[tarih_maskesi(self.alis["tarih"], bas, bit)].reset_index(drop=True)
+            if s is not None:
+                self.satis_gecmis = self.satis_tum[self.satis_tum["tarih"] < s].reset_index(drop=True)
+                son = self.satis_gecmis["tarih"].max()
+                self.ref_tarih = son if pd.notna(son) else s - pd.Timedelta(days=1)
+
+    def tarih_etiketi(self) -> str:
+        """'01.01.2025 – 31.12.2025' (filtre yoksa boş)."""
+        if not self.tarih_filtre:
+            return ""
+        b, s = self.tarih_filtre
+        g = lambda v: f"{pd.Timestamp(v):%d.%m.%Y}" if v else "…"  # noqa: E731
+        return f"{g(b)} – {g(s)}"
 
     # ------------------------------------------------------------------ özet
     def ozet(self) -> dict:
@@ -117,8 +164,8 @@ class Analiz:
             "urun_sayisi": int(s.loc[~s["iade"], "malzeme_ref"].nunique()),
             "net_alis": float(self.alis["net_tutar"].sum()),
             "tedarikci_sayisi": int(self.alis["cari_ref"].nunique()),
-            "tarih_bas": self.meta.get("tarih_bas", ""),
-            "tarih_bit": self.meta.get("tarih_bit", ""),
+            "tarih_bas": (self.tarih_filtre or (None, None))[0] or self.meta.get("tarih_bas", ""),
+            "tarih_bit": (self.tarih_filtre or (None, None))[1] or self.meta.get("tarih_bit", ""),
             **self._kar_ozeti(),
         }
 
@@ -226,19 +273,34 @@ class Analiz:
                                       fatura_sayisi=("fatura_no", "nunique"),
                                       musteri_sayisi=("cari_ref", "nunique"))
              .join(a.groupby("yil_ay").agg(net_alis=("net_tutar", "sum")), how="outer").fillna(0).reset_index())
-        t["gecen_yil_ayni_ay"] = t["yil_ay"].map(
-            lambda ym: t.set_index("yil_ay")["net_satis"].get(f"{int(ym[:4]) - 1}{ym[4:]}", np.nan))
+        # geçen yılın aynı ayı: tarih filtresi o ayı dışarıda bırakmış olsa da süzülmemiş veriden
+        tum = self.satis_tum.groupby(self.satis_tum["tarih"].dt.strftime("%Y-%m"))["net_tutar"].sum()
+        t["gecen_yil_ayni_ay"] = t["yil_ay"].map(lambda ym: tum.get(f"{int(ym[:4]) - 1}{ym[4:]}", np.nan))
         t["yillik_degisim"] = t["net_satis"] / t["gecen_yil_ayni_ay"] - 1
         return t
 
     def donem_karsilastirma(self, seviye: str = "cari"):
         """Bu yılın başından verideki son tarihe kadar olan satışı, geçen yılın aynı dönemiyle karşılaştırır.
-        seviye: "cari" veya "malzeme". Geçen yıla ait veri yoksa None döner."""
+        seviye: "cari" veya "malzeme". Geçen yıla ait veri yoksa None döner.
+        Tarih filtresi varken: seçilen aralık, süzülmemiş veride bir yıl önceki aynı aralıkla karşılaştırılır."""
         s = self.satis
+        if s.empty or s["tarih"].isna().all():
+            return None
         son = s["tarih"].max()
-        bu = s[(s["tarih"].dt.year == son.year) & (s["tarih"] <= son)]
-        gecen_son = son - pd.DateOffset(years=1)
-        gecen = s[(s["tarih"].dt.year == son.year - 1) & (s["tarih"] <= gecen_son)]
+        if self.tarih_filtre:
+            ilk = s["tarih"].min().normalize()
+            bu = s
+            gecen_son = son - pd.DateOffset(years=1)
+            tum = self.satis_tum
+            if tum["tarih"].min() > ilk - pd.DateOffset(years=1) + pd.Timedelta(days=7):
+                return None   # verideki ilk tarih geçen yılın aynı aralığını kapsamıyor: karşılaştırma yanıltıcı olur
+            gecen = tum[(tum["tarih"] >= ilk - pd.DateOffset(years=1)) & (tum["tarih"] <= gecen_son)]
+            donem = (f"{ilk.date()} – {son.date()}", f"{(ilk - pd.DateOffset(years=1)).date()} – {gecen_son.date()}")
+        else:
+            bu = s[(s["tarih"].dt.year == son.year) & (s["tarih"] <= son)]
+            gecen_son = son - pd.DateOffset(years=1)
+            gecen = s[(s["tarih"].dt.year == son.year - 1) & (s["tarih"] <= gecen_son)]
+            donem = (f"{son.year}-01-01 – {son.date()}", f"{son.year - 1}-01-01 – {gecen_son.date()}")
         if gecen.empty or bu.empty:
             return None
         anahtar = "cari_ref" if seviye == "cari" else "malzeme_ref"
@@ -253,7 +315,7 @@ class Analiz:
             t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
             cols = ["malzeme_kod", "malzeme_ad", "grup_kod"]
         t = t.sort_values("fark").reset_index(drop=True)
-        t.attrs["donem"] = (f"{son.year}-01-01 – {son.date()}", f"{son.year - 1}-01-01 – {gecen_son.date()}")
+        t.attrs["donem"] = donem
         return t[cols + ["bu_yil", "gecen_yil", "fark", "degisim"]]
 
     def grup_satis(self):
@@ -265,9 +327,11 @@ class Analiz:
 
     # ------------------------------------------------------------------ stok
     def olu_stok(self, gun: int = 90):
-        """Elinde stok olan ama son `gun` gündür hiç satılmamış malzemeler (referans: verideki son tarih)."""
-        ref_tarih = self.satis["tarih"].max()
-        son_satis = self.satis[~self.satis["iade"]].groupby("malzeme_ref")["tarih"].max().rename("son_satis")
+        """Elinde stok olan ama son `gun` gündür hiç satılmamış malzemeler (referans: verideki son tarih;
+        tarih filtresi varken bitiş tarihine kadarki son satış)."""
+        g = self.satis_gecmis
+        ref_tarih = g["tarih"].max()
+        son_satis = g[~g["iade"]].groupby("malzeme_ref")["tarih"].max().rename("son_satis")
         son_alis = self.alis[~self.alis["iade"]].groupby("malzeme_ref").agg(
             son_alis=("tarih", "max"), alis_tutar=("net_tutar", "sum"), _m=("miktar", "sum"))
         son_alis["ort_birim_maliyet"] = son_alis["alis_tutar"] / son_alis["_m"].replace(0, np.nan)
@@ -424,8 +488,9 @@ class Analiz:
         Bir müşterinin kendi ortalama alım aralığına bakılır (en az `en_az_alim` ayrı alım günü olanlar):
           Kayıp: son alımından bu yana, ortalama aralığının 3 katından (en az 60 gün) uzun süre geçmiş
           Risk : 2 katından (en az 30 gün) uzun süre geçmiş
-        Referans tarih verideki son satış tarihidir."""
-        s = self.satis[~self.satis["iade"] & self.satis["tarih"].notna()]
+        Referans tarih verideki son satış tarihidir (tarih filtresi varken bitiş tarihi; geçmiş alımlar da sayılır)."""
+        gecmis = self.satis_gecmis
+        s = gecmis[~gecmis["iade"] & gecmis["tarih"].notna()]
         g = s.assign(gun=s["tarih"].dt.normalize()).groupby("cari_ref").agg(
             alim_sayisi=("gun", "nunique"), ilk_alim=("gun", "min"), son_alim=("gun", "max"))
         g = g[g["alim_sayisi"] >= en_az_alim].copy()
@@ -435,8 +500,8 @@ class Analiz:
         risk = g["sessiz_gun"] >= np.maximum(30, 2 * g["ort_aralik_gun"])
         g["durum"] = np.where(kayip, "Kayıp", np.where(risk, "Risk", ""))
         g = g[g["durum"] != ""].reset_index()
-        ciro = self.satis.groupby("cari_ref")["net_tutar"].sum().rename("net_tutar")
-        son12 = self.satis[self.satis["tarih"] > self.ref_tarih - pd.DateOffset(years=1)].groupby("cari_ref")["net_tutar"].sum().rename("son_12_ay")
+        ciro = gecmis.groupby("cari_ref")["net_tutar"].sum().rename("net_tutar")
+        son12 = gecmis[gecmis["tarih"] > self.ref_tarih - pd.DateOffset(years=1)].groupby("cari_ref")["net_tutar"].sum().rename("son_12_ay")
         g = g.merge(ciro, on="cari_ref", how="left").merge(son12, on="cari_ref", how="left").fillna({"son_12_ay": 0.0})
         g = g.merge(self.cari[["cari_ref", "cari_kod", "cari_ad", "sehir"]], on="cari_ref", how="left")
         g["son_alim"] = g["son_alim"].dt.date
@@ -452,7 +517,7 @@ class Analiz:
         Günlük satış hızı son `pencere_gun` günün satışından hesaplanır; öneri stoğu `hedef_gun` günlük
         ihtiyaca tamamlar. Durum: "Acil" = stok bitmiş ya da 7 günden az · "Sipariş ver" = tedarik süresinden az."""
         bas = self.ref_tarih - pd.Timedelta(days=pencere_gun)
-        son = self.satis[self.satis["tarih"] > bas]
+        son = self.satis_gecmis[self.satis_gecmis["tarih"] > bas]
         hiz = (son.groupby("malzeme_ref")["miktar"].sum() / pencere_gun).rename("gunluk_satis")
         t = hiz[hiz > 0].to_frame().join(self.stok.set_index("malzeme_ref")["stok_miktar"], how="left").fillna({"stok_miktar": 0.0})
         t["stok_gun"] = t["stok_miktar"].clip(lower=0) / t["gunluk_satis"]
@@ -622,16 +687,21 @@ class Analiz:
         coklu = [("Birleştirilen firmalar", f"{m.get('firma_sayisi')} firma — {m.get('firma_araliklari', '')}. "
                                             "Müşteri ve malzemeler koduna göre eşleştirildi.")] if m.get("firma_sayisi") else []
         uyari = [("UYARI", m["uyari"])] if m.get("uyari") else []
-        return uyari + [
-            ("Firma", f"{m.get('firma')} {m.get('firma_ad', '')}"),
+        filtre = [("Tarih filtresi", f"{self.tarih_etiketi()}: satış, alış, ABC, kâr ve trend bu aralığa göre. "
+                                     "Stok ve cari bakiye/alacak son durumdur (süzülmez).")] if self.tarih_filtre else []
+        bos = lambda v, yok="—": yok if v is None or str(v).strip() in ("", "None", "nan") else v  # noqa: E731
+        irsaliye = m.get("satis_faturasiz_dislanan")
+        return uyari + filtre + [
+            ("Firma", f"{m.get('firma')} {m.get('firma_ad', '')}".strip()),
             *coklu,
-            ("Dönemler", m.get("donemler", "")),
-            ("Tarih aralığı", f"{m.get('tarih_bas')} – {m.get('tarih_bit')}"),
-            ("Okunan ham satır", m.get("ham_satir")),
-            ("İptal edildiği için dışlanan satır", m.get("iptal_satir")),
-            ("İndirim/masraf vb. malzeme dışı satır", m.get("malzeme_disi_satir")),
-            ("Faturalanmamış irsaliye satırı (satışa sayılmadı)", m.get("satis_faturasiz_dislanan")),
-            ("Stok bakiyesinin alındığı dönem", m.get("stok_donemi")),
+            ("Dönemler", bos(m.get("donemler"))),
+            ("Analizdeki tüm tarih aralığı", f"{bos(m.get('tarih_bas'))} – {bos(m.get('tarih_bit'))}"),
+            ("Okunan ham satır", bos(m.get("ham_satir"))),
+            ("İptal edildiği için dışlanan satır", bos(m.get("iptal_satir"), "0")),
+            ("İndirim/masraf vb. malzeme dışı satır", bos(m.get("malzeme_disi_satir"), "0")),
+            ("Faturalanmamış irsaliye satırı (satışa sayılmadı)",
+             bos(irsaliye, "dışlanmadı: analiz \"Sadece faturalanmış satışlar\" kapalıyken oluşturuldu, irsaliyeler satışa sayıldı")),
+            ("Stok bakiyesinin alındığı dönem", bos(m.get("stok_donemi"))),
             ("Maliyet tanımı", "Son alış maliyeti: her satışa o tarihten önceki en son alış (yoksa devir) birim fiyatı; "
                                "brüt kâr tahminidir, muhasebe kârı değildir"),
             ("Maliyeti bulunan satışların ciro payı", f"%{float(m.get('maliyet_kapsama') or 0) * 100:.1f}"

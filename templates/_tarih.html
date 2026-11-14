@@ -1,0 +1,29 @@
+{# Ortak tarih filtresi çubuğu: analiz başına saklanır; panel, listeler, kartlar, faturalar, Excel/PDF/Power BI ve yapay zekâ aynı aralığı kullanır #}
+<style>
+  .tarih-cubuk { background:#fff; border:1px solid var(--cizgi); border-radius:10px; padding:10px 14px; margin:0 0 18px;
+                 display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; font-size:13.5px; }
+  .tarih-cubuk.aktif { border:2px solid var(--mavi); background:#F5F8FD; }
+  .tarih-cubuk input[type=date] { padding:5px 8px; border:1px solid #CBD2DC; border-radius:6px; font:inherit; font-size:13.5px; }
+  .tarih-cubuk .hazir { display:flex; flex-wrap:wrap; gap:4px; }
+  .tarih-cubuk .hazir .btn { padding:3px 9px; font-size:12.5px; }
+  .tarih-cubuk .not { flex-basis:100%; font-size:12.5px; color:var(--soluk); }
+  .tarih-cubuk .etiket { font-weight:600; color:var(--lacivert); }
+</style>
+<form class="tarih-cubuk {{ 'aktif' if tf.aktif }}" method="post" action="/tarih/{{ tf.aid }}">
+  <input type="hidden" name="donus" value="{{ tf.donus }}">
+  <span class="etiket">Tarih filtresi</span>
+  <input type="date" name="bas" value="{{ tf.bas }}" min="{{ tf.veri_bas }}" max="{{ tf.veri_bit }}" aria-label="Başlangıç tarihi">
+  <span>–</span>
+  <input type="date" name="bit" value="{{ tf.bit }}" min="{{ tf.veri_bas }}" max="{{ tf.veri_bit }}" aria-label="Bitiş tarihi">
+  <button class="btn kucuk">Uygula</button>
+  <span class="hazir">
+    <button class="btn kucuk {{ 'ikincil' if tf.aktif }}" name="temizle" value="1" title="Filtreyi kaldır">Tüm tarihler</button>
+    {% for ad, b, s in tf.hazir %}<button class="btn kucuk {{ '' if (tf.bas == b and tf.bit == s) else 'ikincil' }}" name="aralik" value="{{ b }}|{{ s }}" title="{{ b }} – {{ s }}">{{ ad }}</button>{% endfor %}
+  </span>
+  <span class="not">
+    {% if tf.aktif %}<b>{{ tf.etiket }}</b> gösteriliyor. Bu aralık bütün ekranlarda (panel, ABC, ürün/cari kartı, faturalar, veri kontrolü),
+      Excel, PDF, Power BI paketi ve yapay zekâda geçerli. Stok ve cari bakiye/alacak son durumdur, tarihe göre süzülmez.
+      {% if tf.faturalar %} Bu ekranda aşağıdaki Başlangıç/Bitiş ile ayrıca değiştirebilirsiniz.{% endif %}
+    {% else %}Tüm tarihler gösteriliyor ({{ tf.veri_bas }} – {{ tf.veri_bit }}). Seçtiğiniz aralık bütün ekranlara ve raporlara uygulanır.{% endif %}
+  </span>
+</form>
