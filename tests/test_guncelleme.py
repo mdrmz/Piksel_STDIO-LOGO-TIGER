@@ -105,6 +105,26 @@ def test_indir_dogrula_ac(g, monkeypatch, tmp_path):
     assert not any(n.endswith((".tar.gz", ".part")) for n in os.listdir(g._calisma()))   # arşiv silindi
 
 
+def test_yeniden_indirirken_eski_kayit_hazir_gorunmez(g, monkeypatch, tmp_path):
+    """Aynı sürüm yeniden indirilirken (önceki kayıt duruyorken) paket tamamen açılmadan "hazır" görünmemeli."""
+    paket = _paket(tmp_path)
+    _sahte_github(monkeypatch, g, paket)
+    ana = tmp_path / "LogoTigerAnaliz"
+    ana.mkdir()
+    g.indir(g.kontrol(), ana=str(ana))
+    gorulen = []
+    asil_ac = g._ac
+
+    def yavas_ac(arsiv, hedef):
+        gorulen.append(g.hazir())          # açma sürerken
+        asil_ac(arsiv, hedef)
+        gorulen.append(g.hazir())          # açıldı ama henüz adı verilmedi
+    monkeypatch.setattr(g, "_ac", yavas_ac)
+    g.indir(g.kontrol(), ana=str(ana))
+    assert gorulen == [None, None] and g.hazir()["surum"] == "99.0.0"
+    assert not any(n.endswith("_aciliyor") for n in os.listdir(tmp_path))
+
+
 def test_bozuk_paket_uygulanmaz(g, monkeypatch, tmp_path):
     paket = _paket(tmp_path)
     _sahte_github(monkeypatch, g, paket, sha="0" * 64)
@@ -136,7 +156,7 @@ def test_uygula_posix_klasoru_degistirir_ve_yeniden_baslar(g, monkeypatch, tmp_p
     assert cagri["env"]["LOGO_ANALIZ_TARAYICI_ACMA"] == "1"
     eskiler = [n for n in os.listdir(tmp_path) if n.startswith(".LogoTigerAnaliz_eski_")]
     assert len(eskiler) == 1 and not any(n.startswith(".LogoTigerAnaliz_yeni_") for n in os.listdir(tmp_path))
-    assert g.durum_oku()["son_guncelleme"]["surum"] == "99.0.0"
+    assert g.durum_oku()["son_guncelleme"]["surum"] == "99.0.0" and "hazir" not in g.durum_oku()
     g.eski_kopyalari_temizle()
     assert not any(n.startswith(".LogoTigerAnaliz_eski_") for n in os.listdir(tmp_path))
 

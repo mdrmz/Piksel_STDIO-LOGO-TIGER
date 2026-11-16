@@ -193,6 +193,9 @@ def indir(son: dict, ana: str | None = None, ilerleme=None) -> str:
     if not son.get("paket_url"):
         raise GuncellemeHatasi("Bu sistem için güncelleme paketi bulunamadı.")
     ana = ana or program_klasoru()
+    d = durum_oku()
+    if d.pop("hazir", None):   # önceki (uygulanmış ya da yarım) kayıt, yeni paket tamamen açılmadan "hazır" görünmesin
+        durum_yaz(d)
     is_ = _calisma()
     arsiv = os.path.join(is_, paket_adi() or "paket")
     h = hashlib.sha256()
@@ -213,15 +216,18 @@ def indir(son: dict, ana: str | None = None, ilerleme=None) -> str:
         raise GuncellemeHatasi("İndirilen paketin doğrulaması (SHA-256) tutmadı; güncelleme yapılmadı.")
     os.replace(arsiv + ".part", arsiv)
     hedef = _yeni_klasor_yolu(son["surum"], ana)
-    shutil.rmtree(hedef, ignore_errors=True)
-    os.makedirs(hedef)
+    gecici = hedef + "_aciliyor"   # önce geçici klasöre açılır, tamamı bitince tek adımda adı verilir
+    shutil.rmtree(gecici, ignore_errors=True)
+    os.makedirs(gecici)
     try:
-        _ac(arsiv, hedef)
-        yeni = os.path.join(hedef, PROGRAM_AD)
-        if not os.path.isfile(program_dosyasi(yeni)):
+        _ac(arsiv, gecici)
+        if not os.path.isfile(program_dosyasi(os.path.join(gecici, PROGRAM_AD))):
             raise GuncellemeHatasi("Paketin içinde program bulunamadı.")
-    except Exception:
         shutil.rmtree(hedef, ignore_errors=True)
+        os.rename(gecici, hedef)
+        yeni = os.path.join(hedef, PROGRAM_AD)
+    except Exception:
+        shutil.rmtree(gecici, ignore_errors=True)
         raise
     finally:
         try:
@@ -397,6 +403,9 @@ def uygula(h: dict | None = None, cikis=os._exit):
         cikis(0)
         return
     klasoru_degistir(ana, yeni)
+    d = durum_oku()
+    d.pop("hazir", None)
+    durum_yaz(d)
     exe = program_dosyasi(ana)
     _exec(exe, [exe] + [a for a in sys.argv[1:] if a != "--mcp"], temiz_ortam())
 
