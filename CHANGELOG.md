@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## v0.10.1 — 2026-11-16
+- **Linux/macOS (Docker): tarayıcıdan seçilen yedek açılamıyordu** ("Cannot open backup device … Operating system
+  error 5 (Access is denied)"). Yüklenen dosya yalnızca sahibinin okuyabildiği izinle konteynerin klasörüne
+  taşınıyordu; konteynerdeki SQL Server başka kullanıcıyla çalıştığı için okuyamıyordu. Dosyaya artık okuma izni
+  veriliyor (kopyalanan yedeklerde de). Hata mesajındaki "Windows:" ifadesi kaldırıldı.
+
 ## v0.10.0 — 2026-11-16
 Rakamların nereden geldiğini satır satır gösteren döküm ve otomatik güncelleme.
 - **Fatura satırları ekranı ("rakamlar nereden geliyor"):** tüm faturaların tüm satırları tek listede. Her satırda
