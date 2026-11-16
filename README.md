@@ -57,6 +57,11 @@ Her şey kendi bilgisayarınızda çalışır; isteğe bağlı yapay zekâ özel
 > Program yedeği geçici bir veritabanına (`LOGOANALIZ_XXXXXXXX`) geri yükler, verileri okur ve bu geçici veritabanını
 > **siler**. Firmanın kendi Logo veritabanına dokunulmaz, yazılmaz.
 
+> **Güncelleme kendiliğinden olur.** Program açılışta yeni sürüm olup olmadığına bakar, varsa arka planda indirir ve
+> bir sonraki açılışta kendini günceller (beklemeden geçmek için sayfanın üstündeki **Şimdi güncelle**). Analizleriniz ve
+> ayarlarınız korunur. Kapatmak için **Ayarlar → Otomatik güncelle**. Programı yazılabilir bir klasörde tutun
+> (Masaüstü, İndirilenler gibi; Program Files değil).
+
 > İnternet olmayan bir yere gidecekseniz programı önceden kendi laptopunuzda bir kez çalıştırıp SQL Server'ı kurdurun;
 > sahada internet gerekmez.
 
@@ -93,6 +98,7 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 | **Hesaplama dışı** | Seçilen carileri ve faturaları tüm analizlerden çıkarma (geri alınabilir) |
 | **Tarih filtresi** | Her ekranın üstündeki çubuktan bir kez seçilen tarih aralığı panel, listeler, kartlar, faturalar, Excel, PDF, Power BI paketi ve yapay zekâya birlikte uygulanır (stok ve cari bakiye son durumdur) |
 | **Veri kontrolü** | Logo'nun fatura toplamıyla farklı çıkan faturalar ve otomatik bulunan nedeni (masraf satırı, iptal satırı, tevkifat, dağıtılmamış indirim…), Logo ile sağlama köprüsü, boş/eksik veriler (carisi seçilmemiş satış, kartı olmayan cari/malzeme, maliyeti bulunamayan satış…) ve Excel çıktısı |
+| **Fatura satırları** | "Rakamlar nereden geliyor": tüm faturaların tüm satırları; Logo ham alanları (`TOTAL`, `DISTDISC`, `VATMATRAH`), hesaba giren tutar ve girmeyenlerin nedeni; satış − iade = net satış hesabı; Excel |
 | **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
 | **Ürün ABC** | Kârlılığa göre (A = tahmini brüt kârın çoğunu getirenler) ya da net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
@@ -136,7 +142,7 @@ firmadan ayrıldıktan sonra programı açıp **Önceki analizler** listesinden 
 
 ## Yapay zekâ
 
-Analizleri yapay zekâya yorumlatmanın üç yolu var (**Yapay zekâ ayarları** sayfası). Hiçbiri zorunlu değildir.
+Analizleri yapay zekâya yorumlatmanın üç yolu var (**Ayarlar** sayfası). Hiçbiri zorunlu değildir.
 
 | Yol | Kimin için | Ne olur |
 |---|---|---|
@@ -241,6 +247,8 @@ makinelerde SQL Server'ı kurup `.bak` geri yükleme akışını hem kaynak kodd
 
 **Yeni sürüm yayınlama:** `core/__init__.py` içindeki `__version__` değerini artırıp (ör. `"0.4.1"`) `main`'e gönderin.
 GitHub Actions testleri çalıştırır, üç sistem için paketleri derler, `v0.4.1` etiketini ve Release'i kendisi oluşturur.
+Kurulu programlar bu Release'i kendileri bulur, indirir ve bir sonraki açılışta güncellenir. Paket adları
+(`LogoTigerAnaliz-windows-x64.zip` vb.) değişmemeli; otomatik güncelleme bu adlara bakar.
 
 **Klasör yapısı**
 ```
@@ -259,6 +267,7 @@ core/yz.py             yapay zekâ: sağlayıcılar, anonimleştirme, soru-cevap
 core/mcp_sunucu.py     Claude Desktop bağlantısı (MCP, `--mcp`)
 core/yzpaket.py        ChatGPT vb. için yapay zekâ paketi
 core/tanilama.py       işlem günlüğü ve tanılama paketi
+core/guncelleme.py     otomatik güncelleme: GitHub Releases kontrolü, indirme, doğrulama, klasör değiştirme
 demo/                  Logo yapısında örnek veri üretici
 templates/             arayüz sayfaları
 tests/                 uçtan uca testler + gerçek Windows/SQL Server entegrasyon testi

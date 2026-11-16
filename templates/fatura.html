@@ -46,16 +46,17 @@
 
 <h2>Satırlar <span class="soluk kucuk">({{ satirlar|length }})</span></h2>
 <div class="kart" style="padding:6px 10px;overflow-x:auto"><table>
-  <tr><th>Malzeme</th><th>Satır tipi</th><th class="s">Miktar</th><th class="s">Birim fiyat</th><th class="s" title="İndirimler düşülmüş, KDV hariç: tutar ÷ miktar">Net birim fiyat</th><th class="s">Tutar (KDV hariç)</th><th>Durum</th><th>Logo kaydı</th></tr>
+  <tr><th>Malzeme</th><th>Satır tipi</th><th class="s">Miktar</th><th class="s">Birim fiyat</th><th class="s" title="İndirimler düşülmüş, KDV hariç: tutar ÷ miktar">Net birim fiyat</th><th class="s" title="Logo TOTAL">TOTAL</th><th class="s" title="Logo DISTDISC: dağıtılan dip indirim">DISTDISC</th><th class="s" title="Logo VATMATRAH">VATMATRAH</th><th class="s">Tutar (KDV hariç)</th><th>Durum</th><th>Logo kaydı</th></tr>
   {% for s in satirlar.itertuples() %}
   <tr class="{{ '' if s.durum == 'Analizde' else 'disarida' }}">
     <td>{% if s.malzeme_kod == s.malzeme_kod and s.malzeme_kod %}<a href="/urun/{{ aid }}?kod={{ s.malzeme_kod|urlencode }}">{{ s.malzeme_ad }}</a>{% endif %}<div class="kucuk soluk">{{ s.malzeme_kod if s.malzeme_kod == s.malzeme_kod else '' }}</div></td>
     <td>{{ s.satir_tipi }}</td><td class="s">{{ s.miktar|tl(2) }}</td><td class="s">{{ s.birim_fiyat|tl(2) }}</td><td class="s">{{ s.net_birim_fiyat|tl(2) }}</td>
+    <td class="s soluk">{{ s.logo_total|tl(2) }}</td><td class="s soluk">{{ s.logo_distdisc|tl(2) }}</td><td class="s soluk">{{ s.logo_vatmatrah|tl(2) }}</td>
     <td class="s">{{ s.net_tutar|tl(2) }}</td>
     <td>{% if s.durum == 'Analizde' %}<span class="rozet rA">Analizde</span>{% else %}<span class="kucuk">{{ s.durum }}</span>{% endif %}</td>
     <td class="logo-ref kucuk">LG_{{ f.firma }}_{{ f.logo_donem }}_STLINE · ref {{ s.satir_ref }}</td>
   </tr>
-  {% else %}<tr><td colspan="8" class="soluk">Bu faturaya bağlı stok satırı yok (ör. yalnızca hizmet ya da boş fatura).</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="11" class="soluk">Bu faturaya bağlı stok satırı yok (ör. yalnızca hizmet ya da boş fatura).</td></tr>{% endfor %}
 </table></div>
 <p class="kucuk soluk">Miktar ana birime çevrilmiştir (koli → adet gibi). Birim fiyat Logo'daki satır fiyatıdır (<code>PRICE</code>, fatura biriminde);
   net birim fiyat indirimler düşülmüş KDV hariç fiyattır (tutar ÷ ana birim miktarı).

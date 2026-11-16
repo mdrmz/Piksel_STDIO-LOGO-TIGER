@@ -83,6 +83,7 @@ jobs:
         shell: bash
         env:
           LOGO_ANALIZ_TARAYICI_ACMA: "1"
+          LOGO_ANALIZ_GUNCELLEME: "0"
           LOGO_ANALIZ_KLASOR: ${{ runner.temp }}/la
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then EXE=dist/LogoTigerAnaliz/LogoTigerAnaliz.exe; else EXE=dist/LogoTigerAnaliz/LogoTigerAnaliz; fi

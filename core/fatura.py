@@ -11,6 +11,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 # fatura türü grupları (filtre)
@@ -25,6 +26,9 @@ TUR_GRUP = {
 ISARET = {7: 1, 8: 1, 2: -1, 3: -1, 1: 1, 6: -1}   # iadeler eksi
 SATIS_TR, ALIS_TR = (7, 8, 2, 3), (1, 6)
 FARK_ESIK = 1.0   # TL: bu kadarın altı yuvarlama sayılır
+# fatura satırlarında saklanan Logo ham alanları (core/logo.py): satır dökümü ve Logo ile sağlama
+HAM_KOLON = ("linetype", "logo_miktar", "birim_katsayi", "logo_total", "logo_distdisc", "logo_vatmatrah",
+             "logo_linenet", "satir_iptal", "tutar_kaynagi")
 SIRALANABILIR = {"tarih", "fatura_no", "tur", "cari_ad", "ambar_ad", "analiz_tutar", "logo_matrah", "logo_net", "fark"}
 
 
@@ -54,8 +58,13 @@ def yukle(con) -> Veri:
     """Analiz deposundaki faturaları satır özetleri, cari ve ambar adlarıyla birlikte okur."""
     q = lambda s: pd.read_sql_query(s, con)  # noqa: E731
     f = q("SELECT * FROM dim_fatura")
+    sk = {r[1] for r in con.execute("PRAGMA table_info(fatura_satir)")}
+    ham = [k for k in HAM_KOLON if k in sk]   # v0.10.0 öncesi analizlerde Logo ham alanları yok
     s = q("SELECT donem, fatura_ref, satir_ref, satir_tipi, trcode, malzeme_ref, miktar, birim_fiyat, net_tutar, "
-          "ambar, durum FROM fatura_satir")
+          "ambar, durum" + "".join(", " + k for k in ham) + " FROM fatura_satir")
+    for k in HAM_KOLON:
+        if k not in s.columns:
+            s[k] = np.nan
     cari = q("SELECT cari_ref, cari_kod, cari_ad FROM dim_cari")
     mal = q("SELECT malzeme_ref, malzeme_kod, malzeme_ad, grup_kod FROM dim_malzeme")
     try:
@@ -252,6 +261,64 @@ def detay(v: Veri, donem: str, ref: int) -> tuple[dict, pd.DataFrame] | None:
     return f.iloc[0].to_dict(), s
 
 
+# ---------------------------------------------------------------------------- satır dökümü
+# Tüm faturaların satırları tek listede: her satırın Logo ham alanları, hesaba girip girmediği, girmediyse nedeni
+# ve rakama etkisi. Paneldeki net satış / net alış bu listenin "Hesaba giren tutar" sütununun toplamıdır.
+SATIR_DURUM = {"tum": "Tüm satırlar", "analizde": "Sadece hesaba girenler", "disarida": "Sadece hesaba girmeyenler"}
+SATIR_SIRALA = {"tarih", "fatura_no", "cari_ad", "malzeme_ad", "miktar", "net_tutar", "etki", "durum"}
+HESAP_AD = {7: "Satış +", 8: "Satış +", 2: "Satış iadesi −", 3: "Satış iadesi −", 1: "Alış +", 6: "Alış iadesi −"}
+
+
+def satir_dokumu(v: Veri, f: pd.DataFrame, urun_s: pd.DataFrame | None, fl: Filtre) -> pd.DataFrame:
+    """Filtreye uyan faturaların satırları; fatura başlığı, cari, ambar adı, hesaba etkisi ve Logo kaydıyla."""
+    bas = f[["donem", "fatura_ref", "tarih", "fatura_no", "belge_no", "tur", "cari_kod", "cari_ad", "firma",
+             "logo_donem", "iptal", "haric_neden"]].rename(columns={"tur": "fatura_tur", "iptal": "fatura_iptal"})
+    s = v.satirlar.merge(bas, on=["donem", "fatura_ref"], how="inner")
+    if urun_s is not None:
+        k = lambda d: d["donem"].astype(str) + ":" + d["satir_ref"].astype(str)  # noqa: E731
+        s = s[k(s).isin(set(k(urun_s)))]
+    if fl.ambar is not None:
+        s = s[s["ambar"] == fl.ambar]
+    ambar_ad = {a["ambar"]: a["ambar_ad"] for a in v.ambarlar}
+    s = s.assign(ambar_ad=s["ambar"].map(lambda n: ambar_ad.get(n) or f"Ambar {n}"))
+    analizde = s["durum"] == "Analizde"
+    isaret = s["trcode"].map(ISARET).fillna(0)
+    s["etki"] = (s["net_tutar"] * isaret).where(analizde & s["trcode"].isin(SATIS_TR + ALIS_TR), 0.0)
+    s["hesap"] = s["trcode"].map(HESAP_AD).where(analizde, "").fillna("")
+    s["satir_tablo"] = "LG_" + s["firma"].astype(str) + "_" + s["logo_donem"].astype(str) + "_STLINE"
+    s["fatura_tablo"] = "LG_" + s["firma"].astype(str) + "_" + s["logo_donem"].astype(str) + "_INVOICE"
+    return s.sort_values(["tarih", "fatura_ref", "satir_ref"], kind="mergesort").reset_index(drop=True)
+
+
+def satir_hesap(s: pd.DataFrame) -> dict:
+    """Satır dökümünden net satış ve net alışın nasıl oluştuğu: hesaba girenler ve girmeyenler, nedenleriyle."""
+    a = s[s["durum"] == "Analizde"]
+
+    def top(trc):
+        x = a[a["trcode"].isin(trc)]
+        return {"tutar": float(x["net_tutar"].sum()), "satir": int(len(x)), "fatura": int(x[["donem", "fatura_ref"]].drop_duplicates().shape[0])}
+
+    h = {"satis": top((7, 8)), "satis_iade": top((2, 3)), "alis": top((1,)), "alis_iade": top((6,))}
+    h["net_satis"] = h["satis"]["tutar"] - h["satis_iade"]["tutar"]
+    h["net_alis"] = h["alis"]["tutar"] - h["alis_iade"]["tutar"]
+    d = s[s["durum"] != "Analizde"]
+    h["disarida"] = (d.groupby("durum", as_index=False).agg(satir=("satir_ref", "size"), tutar=("net_tutar", "sum"))
+                      .sort_values("satir", ascending=False).to_dict("records"))
+    h["satir"], h["hesapta"] = int(len(s)), int(len(a))
+    h["ham_var"] = bool(s["tutar_kaynagi"].notna().any()) if len(s) else True
+    return h
+
+
+def satir_sirala(s: pd.DataFrame, sdurum: str, sirala: str, yon: str) -> pd.DataFrame:
+    if sdurum == "analizde":
+        s = s[s["durum"] == "Analizde"]
+    elif sdurum == "disarida":
+        s = s[s["durum"] != "Analizde"]
+    if sirala not in SATIR_SIRALA:
+        sirala = "tarih"
+    return s.sort_values([sirala, "fatura_ref", "satir_ref"], ascending=yon == "artan", kind="mergesort")
+
+
 # ---------------------------------------------------------------------------- Excel
 FATURA_KOLON = [
     ("tarih", "Tarih"), ("fatura_no", "Fatura no"), ("belge_no", "Belge no"), ("tur", "Fatura türü"),
@@ -266,11 +333,26 @@ SATIR_KOLON = [
     ("cari_ad", "Cari adı"), ("malzeme_kod", "Malzeme kodu"), ("malzeme_ad", "Malzeme adı"), ("grup_kod", "Grup"),
     ("satir_tipi", "Satır tipi"), ("miktar", "Miktar (ana birim)"), ("birim_fiyat", "Birim fiyat (Logo PRICE)"),
     ("net_birim_fiyat", "Net birim fiyat (indirimli, KDV hariç)"),
-    ("net_tutar", "KDV hariç tutar (TL)"), ("durum", "Durum"), ("satir_tablo", "Logo tablosu"),
+    ("net_tutar", "KDV hariç tutar (TL)"), ("logo_total", "Logo TOTAL"), ("logo_distdisc", "Logo DISTDISC"),
+    ("logo_vatmatrah", "Logo VATMATRAH"), ("tutar_kaynagi", "Tutarın alındığı alan"), ("durum", "Durum"),
+    ("satir_tablo", "Logo tablosu"),
     ("satir_ref", "LOGICALREF"), ("fatura_ref", "Fatura LOGICALREF"),
 ]
 PARA_K = {"analiz_tutar", "logo_matrah", "logo_kdv", "logo_net", "fark", "birim_fiyat", "net_birim_fiyat", "net_tutar",
-          "urun_tutar"}
+          "urun_tutar", "logo_total", "logo_distdisc", "logo_vatmatrah", "logo_linenet", "etki"}
+SAYI_K = {"miktar", "satir_say", "disarida_satir", "urun_miktar", "logo_miktar", "birim_katsayi"}
+SATIR_DOKUM_KOLON = [
+    ("tarih", "Tarih"), ("fatura_no", "Fatura no"), ("belge_no", "Belge no"), ("fatura_tur", "Fatura türü"),
+    ("cari_kod", "Cari kodu"), ("cari_ad", "Cari adı"), ("malzeme_kod", "Malzeme kodu"), ("malzeme_ad", "Malzeme adı"),
+    ("grup_kod", "Grup"), ("ambar_ad", "Ambar"), ("satir_tipi", "Satır tipi (LINETYPE)"), ("trcode", "Hareket (TRCODE)"),
+    ("logo_miktar", "Logo miktar (AMOUNT)"), ("birim_katsayi", "Birim çevrimi (UINFO2/UINFO1)"),
+    ("miktar", "Miktar (ana birim)"), ("birim_fiyat", "Birim fiyat (PRICE)"), ("logo_total", "Tutar (TOTAL)"),
+    ("logo_distdisc", "Dağıtılan indirim (DISTDISC)"), ("logo_vatmatrah", "KDV matrahı (VATMATRAH)"),
+    ("tutar_kaynagi", "Tutarın alındığı alan"), ("net_tutar", "KDV hariç tutar (TL)"), ("hesap", "Hesaba nasıl girer"),
+    ("etki", "Hesaba giren tutar (TL)"), ("durum", "Durum / hesaba girmeme nedeni"), ("haric_neden", "Hesaplama dışı"),
+    ("satir_tablo", "Logo satır tablosu"), ("satir_ref", "Satır LOGICALREF"), ("fatura_tablo", "Logo fatura tablosu"),
+    ("fatura_ref", "Fatura LOGICALREF"),
+]
 EXCEL_SATIR_SINIR = 1_000_000
 
 
@@ -306,7 +388,7 @@ def excel_sayfalari(wb, v: Veri, f: pd.DataFrame, baslik_not: str = "", satir_si
                     ws.write_number(i, j, float(x), kirmizi if abs(x) > FARK_ESIK else para)
                 elif k in PARA_K:
                     ws.write_number(i, j, float(x), para)
-                elif k in ("miktar", "satir_say", "disarida_satir", "urun_miktar"):
+                elif k in SAYI_K:
                     ws.write_number(i, j, float(x), sayi)
                 elif k == "iptal":
                     ws.write(i, j, "İptal" if x else "")
@@ -341,5 +423,64 @@ def excel_indir(v: Veri, f: pd.DataFrame, yol: str, baslik_not: str = ""):
     import xlsxwriter
     wb = xlsxwriter.Workbook(yol, {"nan_inf_to_errors": True})
     excel_sayfalari(wb, v, f, baslik_not)
+    wb.close()
+    return yol
+
+
+def satir_excel(s: pd.DataFrame, h: dict, yol: str, baslik_not: str = "", satir_siniri: int = EXCEL_SATIR_SINIR):
+    """Satır dökümü: tek sayfada tüm satırlar + Hesap sayfasında net satış / net alışın oluşumu."""
+    import xlsxwriter
+    wb = xlsxwriter.Workbook(yol, {"nan_inf_to_errors": True})
+    bf = wb.add_format({"bold": True, "font_color": "white", "bg_color": "#1F3864", "border": 1, "text_wrap": True, "valign": "vcenter"})
+    para = wb.add_format({"num_format": "#,##0.00"})
+    sayi = wb.add_format({"num_format": "#,##0.####"})
+    tarih = wb.add_format({"num_format": "dd.mm.yyyy"})
+    kalin = wb.add_format({"bold": True, "num_format": "#,##0.00"})
+    notf = wb.add_format({"italic": True, "font_color": "#666666"})
+
+    ws = wb.add_worksheet("Hesap")
+    ws.set_column(0, 0, 46), ws.set_column(1, 3, 18)
+    ws.write(0, 0, (baslik_not + " " if baslik_not else "") + "Tutarlar KDV hariç (satırın VATMATRAH alanı).", notf)
+    for j, b in enumerate(["Kalem", "Tutar (TL)", "Satır", "Fatura"]):
+        ws.write(2, j, b, bf)
+    r = 3
+    for ad, k, isaret in [("Satış satırları (TRCODE 7, 8)", "satis", ""), ("− Satış iadesi satırları (TRCODE 2, 3)", "satis_iade", "-"),
+                          ("Alış satırları (TRCODE 1)", "alis", ""), ("− Alış iadesi satırları (TRCODE 6)", "alis_iade", "-")]:
+        ws.write(r, 0, ad), ws.write_number(r, 1, h[k]["tutar"], para), ws.write_number(r, 2, h[k]["satir"]), ws.write_number(r, 3, h[k]["fatura"])
+        r += 1
+        if k == "satis_iade":
+            ws.write(r, 0, "= NET SATIŞ"), ws.write_number(r, 1, h["net_satis"], kalin)
+            r += 2
+    ws.write(r, 0, "= NET ALIŞ"), ws.write_number(r, 1, h["net_alis"], kalin)
+    r += 2
+    ws.write(r, 0, "Hesaba girmeyen satırlar", bf), ws.write(r, 1, "Tutar (TL)", bf), ws.write(r, 2, "Satır", bf)
+    for d in h["disarida"]:
+        r += 1
+        ws.write(r, 0, d["durum"]), ws.write_number(r, 1, float(d["tutar"] or 0), para), ws.write_number(r, 2, d["satir"])
+
+    ws = wb.add_worksheet("Satırlar")
+    ws.write(0, 0, f"{len(s):,} satır".replace(",", ".") + (f" (ilk {satir_siniri:,})".replace(",", ".") if len(s) > satir_siniri else "")
+             + ". 'Hesaba giren tutar' sütununun toplamı Hesap sayfasındaki net satış + net alıştır (iadeler eksi).", notf)
+    for j, (_, b) in enumerate(SATIR_DOKUM_KOLON):
+        ws.write(1, j, b, bf)
+    kol = [k for k, _ in SATIR_DOKUM_KOLON]
+    for i, row in enumerate(s.head(satir_siniri)[kol].itertuples(index=False), start=2):
+        for j, (k, x) in enumerate(zip(kol, row)):
+            if x is None or x is pd.NaT or (isinstance(x, float) and pd.isna(x)):
+                continue
+            if k == "tarih":
+                ws.write_datetime(i, j, pd.Timestamp(x).to_pydatetime(), tarih)
+            elif k in PARA_K:
+                ws.write_number(i, j, float(x), para)
+            elif k in SAYI_K:
+                ws.write_number(i, j, float(x), sayi)
+            elif isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, bool):
+                ws.write_number(i, j, float(x))
+            else:
+                ws.write(i, j, str(x))
+    ws.freeze_panes(2, 0)
+    ws.autofilter(1, 0, max(1, min(len(s), satir_siniri) + 1), len(kol) - 1)
+    for j, (k, b) in enumerate(SATIR_DOKUM_KOLON):
+        ws.set_column(j, j, 13 if k in PARA_K or k in SAYI_K or k == "tarih" else min(36, max(10, len(b) + 2)))
     wb.close()
     return yol

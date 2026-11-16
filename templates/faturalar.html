@@ -5,7 +5,7 @@
   .filtre { display:grid; grid-template-columns:repeat(6,1fr); gap:10px 14px; align-items:end; }
   .filtre label { margin:0 0 4px; } @media (max-width:1000px) { .filtre { grid-template-columns:repeat(2,1fr); } }
   .turler { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13.5px; } .turler label { display:inline-flex; gap:5px; align-items:center; margin:0; color:var(--yazi); font-size:13.5px; }
-  input[type=date] { width:100%; padding:7px 9px; border:1px solid #CBD2DC; border-radius:6px; font:inherit; }
+  .filtre input[type=date] { width:100%; padding:7px 9px; border:1px solid #CBD2DC; border-radius:6px; font:inherit; }
   table.fat td, table.fat th { white-space:nowrap; } table.fat td.ad { white-space:normal; min-width:180px; }
   table.fat tr:hover td { background:#F7F9FC; } th a { color:inherit; text-decoration:none; } th a:hover { color:var(--mavi); }
   .fark { color:#B42318; font-weight:600; } .iptal td { color:#9AA1AC; text-decoration:line-through; } .iptal td.durum { text-decoration:none; }
@@ -17,7 +17,7 @@
     <h1>Faturalar</h1>
     <div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }} · <a href="/panel/{{ aid }}">Panele dön</a></div>
   </div>
-  {% if v %}<div style="display:flex;gap:8px"><a class="btn ikincil" href="/haric/{{ aid }}">Hesaplama dışı</a><a class="btn" href="{{ excel_url }}">Excel'e indir{% if fl.aktif_mi() %} (filtreli){% endif %}</a></div>{% endif %}
+  {% if v %}<div style="display:flex;gap:8px"><a class="btn ikincil" href="/haric/{{ aid }}">Hesaplama dışı</a><a class="btn ikincil" href="{{ satirlar_url }}" title="Bu faturaların tüm satırları tek listede: Logo ham alanları, hesaba girip girmediği ve nedeni">Satır satır döküm</a><a class="btn" href="{{ excel_url }}">Excel'e indir{% if fl.aktif_mi() %} (filtreli){% endif %}</a></div>{% endif %}
 </div>
 
 {% if not v %}

@@ -281,7 +281,14 @@ def _firma_oku(kaynak, firma: Firma, donemler: list[str], ayar: AktarimAyari, sa
         "satir_ref": fs["LOGICALREF"].values, "satir_tipi": tip.map(SATIR_TIPI_AD).fillna("Diğer").values,
         "trcode": trc.values, "malzeme_ref": pd.to_numeric(fs["STOCKREF"], errors="coerce").fillna(0).astype("int64").values,
         "miktar": fs["miktar"].values, "birim_fiyat": fs["PRICE"].values, "net_tutar": fs["net_tutar"].values,
-        "ambar": pd.to_numeric(fs["SOURCEINDEX"], errors="coerce").fillna(0).astype(int).values, "durum": durum})
+        "ambar": pd.to_numeric(fs["SOURCEINDEX"], errors="coerce").fillna(0).astype(int).values, "durum": durum,
+        # Logo'nun ham alanları: satır dökümünde rakamın nereden geldiğini göstermek ve Logo ile sağlamak için
+        "linetype": tip.values, "logo_miktar": fs["AMOUNT"].values, "birim_katsayi": (u2 / u1)[fs.index].values,
+        "logo_total": fs["TOTAL"].values, "logo_distdisc": fs["DISTDISC"].values,
+        "logo_vatmatrah": fs["VATMATRAH"].values, "logo_linenet": fs["LINENET"].values,
+        "satir_iptal": (pd.to_numeric(fs["CANCELLED"], errors="coerce").fillna(0).astype(int) == 1).values,
+        "tutar_kaynagi": np.where(fs["VATMATRAH"].notna(), "VATMATRAH",
+                                  np.where(fs["LINENET"].notna(), "LINENET", "TOTAL − DISTDISC"))})
     st = st[~iptal & ~malzeme_disi].copy()
     st["hareket"] = st["TRCODE"].map(TRCODE_AD).fillna("Diğer")
     # birim maliyet hesabı için giriş tutarı (devir fişlerinde VATMATRAH boş/0 olabilir -> TOTAL)
