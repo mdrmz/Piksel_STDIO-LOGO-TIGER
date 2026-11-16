@@ -38,6 +38,8 @@ jobs:
           pyinstaller LogoTigerAnaliz.spec --noconfirm
       - name: Paketlenmiş uygulama ile uçtan uca test
         run: python tests/paket_testi.py
+      - name: Otomatik güncelleme testi (paketlenmiş program kendini günceller)
+        run: python tests/guncelleme_paket_testi.py
       - name: Kurulum günlükleri (hata olursa)
         if: failure() && runner.os == 'Windows'
         shell: pwsh

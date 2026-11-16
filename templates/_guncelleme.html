@@ -1,0 +1,28 @@
+{# Yeni sürüm bildirimi: her sayfanın üstünde. Paketli programda güncelleme arka planda iner, bir sonraki açılışta uygulanır. #}
+{% if gn.yeni or gn.hazir or gn.indiriliyor or gn.hata %}
+<div style="background:#EEF4FF;border-bottom:1px solid #C9D8F5;padding:9px 28px;font-size:14px">
+  <div style="max-width:1124px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  {% if gn.hazir %}
+    <span>🔄 <b>Yeni sürüm v{{ gn.hazir }} indirildi.</b> Program bir sonraki açılışta kendini günceller; analizleriniz ve ayarlarınız korunur.</span>
+    <form method="post" action="/guncelleme/uygula" style="margin:0"><button class="btn kucuk">Şimdi güncelle</button></form>
+    <a class="kucuk" href="{{ gn.sayfa }}" target="_blank">Neler yeni?</a>
+  {% elif gn.indiriliyor %}
+    <span>⬇️ Yeni sürüm v{{ gn.son }} arka planda indiriliyor… {% if gn.yuzde %}%{{ gn.yuzde }}{% endif %}</span>
+    <script>setTimeout(() => location.reload(), 4000)</script>
+  {% elif gn.yeni and gn.paketli and not gn.yazilabilir %}
+    <span>Yeni sürüm <b>v{{ gn.son }}</b> var, ama programın klasörüne yazılamıyor (ör. Program Files). Programı masaüstü ya da İndirilenler gibi bir klasöre taşıyın ya da yeni sürümü elle indirin.</span>
+    <a class="btn kucuk" href="{{ gn.sayfa }}" target="_blank">İndirme sayfası</a>
+  {% elif gn.yeni and gn.paketli %}
+    <span>Yeni sürüm <b>v{{ gn.son }}</b> var (sizde v{{ gn.surum }}).</span>
+    <form method="post" action="/guncelleme/indir" style="margin:0"><button class="btn kucuk">İndir ve güncelle</button></form>
+    <a class="kucuk" href="{{ gn.sayfa }}" target="_blank">Neler yeni?</a>
+  {% elif gn.yeni and gn.git %}
+    <span>Yeni sürüm <b>v{{ gn.son }}</b> var. Program kaynak koddan çalışıyor:</span>
+    <form method="post" action="/guncelleme/uygula" style="margin:0"><button class="btn kucuk">Güncelle (git pull) ve yeniden başlat</button></form>
+  {% elif gn.yeni %}
+    <span>Yeni sürüm <b>v{{ gn.son }}</b> var.</span> <a class="btn kucuk" href="{{ gn.sayfa }}" target="_blank">İndirme sayfası</a>
+  {% endif %}
+  {% if gn.hata %}<span class="kucuk" style="color:var(--uyari)">{{ gn.hata }}</span>{% endif %}
+  </div>
+</div>
+{% endif %}

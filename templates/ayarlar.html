@@ -1,7 +1,30 @@
 {% extends "base.html" %}
-{% block baslik %}Yapay zekâ ayarları — Logo Tiger Analiz{% endblock %}
+{% block baslik %}Ayarlar — Logo Tiger Analiz{% endblock %}
 {% block icerik %}
-<h1>Yapay zekâ</h1>
+<h1>Ayarlar</h1>
+<h2 style="margin-top:14px">Program güncellemesi</h2>
+<div class="kart" style="margin-bottom:22px">
+  <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <div>Kurulu sürüm: <b>v{{ gn.surum }}</b>{% if gn.son %} · en son sürüm: <b>v{{ gn.son }}</b>{% endif %}
+        {% if gn.son and not gn.yeni %}<span class="rozet rA" style="margin-left:6px">güncel</span>{% endif %}</div>
+      <div class="kucuk soluk">{% if gn.son_kontrol %}Son kontrol: {{ gn.son_kontrol }}{% else %}Henüz kontrol edilmedi (internet gerekir){% endif %}
+        {% if gn.son_guncelleme %} · son güncelleme: v{{ gn.son_guncelleme.onceki }} → v{{ gn.son_guncelleme.surum }} ({{ gn.son_guncelleme.tarih[:10] }}){% endif %}</div>
+      {% if not gn.paketli %}<div class="kucuk soluk" style="margin-top:4px">Program kaynak koddan çalışıyor;
+        {% if gn.git %}yeni sürüm çıkınca üstte "git pull ile güncelle" düğmesi görünür.{% else %}yeni sürümü Releases sayfasından indirin.{% endif %}</div>{% endif %}
+    </div>
+    <form method="post" action="/guncelleme/kontrol" style="margin:0"><button class="btn ikincil kucuk">Şimdi kontrol et</button></form>
+  </div>
+  <form method="post" action="/guncelleme/otomatik" style="margin:12px 0 0">
+    <label style="display:flex;gap:8px;align-items:center;color:var(--yazi);font-size:14px;margin:0">
+      <input type="checkbox" name="otomatik" value="1" {{ 'checked' if gn.otomatik }} onchange="this.form.submit()">
+      Otomatik güncelle: yeni sürüm arka planda insin, program bir sonraki açılışta kendini güncellesin</label>
+  </form>
+  <p class="kucuk soluk" style="margin:8px 0 0">Güncelleme yalnızca programın kendisini değiştirir. Analizler, ayarlar, API anahtarı ve SQL Server kurulumu
+    <code>LogoAnaliz</code> klasöründe durur ve korunur. İnternet yoksa kontrol sessizce atlanır.</p>
+</div>
+
+<h2>Yapay zekâ</h2>
 <p class="soluk">Analizleri yapay zekâyla yorumlatmanın üç yolu var. Hangisi size uygunsa onu kullanın; hiçbiri zorunlu değil.</p>
 {% if kaydedildi %}<div class="kart" style="border-color:#BFE3C8;background:#F3FBF5;margin-bottom:14px">Kaydedildi.</div>{% endif %}
 

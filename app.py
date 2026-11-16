@@ -687,6 +687,7 @@ def faturalar_sayfa(aid):
                            f=f.iloc[(sayfa - 1) * SAYFA_BOYU: sayfa * SAYFA_BOYU], o=fatura.ozet(f, urun_s),
                            sayfa=sayfa, sayfa_say=sayfa_say, url=url, sirala_url=sirala_url, fark_esik=fatura.FARK_ESIK,
                            excel_url=url(sayfa=None).replace(f"/faturalar/{aid}?", f"/faturalar/{aid}/excel?", 1),
+                           satirlar_url=url(sayfa=None, sirala=None, yon=None).replace(f"/faturalar/{aid}?", f"/satirlar/{aid}?", 1),
                            sorgu=url(hata=None, sayfa=None).split("?", 1)[1], buraya=url(hata=None), hata=request.args.get("hata"),
                            toplu_ekle=int((~f["iptal"] & ~f["haric"]).sum()), toplu_geri=int((f["haric"] & ~f["iptal"] & (f["haric_neden"] == "Fatura hariç tutuldu")).sum()))
 
@@ -701,6 +702,78 @@ def faturalar_excel(aid):
     f, _ = fatura.suz(v, fl)
     yol = os.path.join(klasor, f"Faturalar_{re.sub(r'[^0-9A-Za-z-]', '', str(bilgi['firma']))}.xlsx")
     fatura.excel_indir(v, f, yol, "Filtreli liste." if fl.aktif_mi() else "Tüm faturalar.")
+    return send_file(yol, as_attachment=True)
+
+
+SATIR_SAYFA_BOYU = 200
+
+
+def _satir_verisi(aid):
+    """Satır dökümü: Faturalar ekranıyla aynı filtreler + satır durumu ve sıralama."""
+    from core import fatura
+    klasor, bilgi, v = _fatura_verisi(aid)
+    if v is None:
+        return klasor, bilgi, v, None, None, None
+    args_ = _tarihli_args(klasor)
+    fl = fatura.Filtre.istekten(args_)
+    fl.sirala, fl.yon = "tarih", "artan"   # fatura sıralaması değil, satır sıralaması kullanılır
+    f, urun_s = fatura.suz(v, fl)
+    s = fatura.satir_dokumu(v, f, urun_s, fl)
+    return klasor, bilgi, v, fl, s, args_
+
+
+@app.route("/satirlar/<aid>")
+def satirlar_sayfa(aid):
+    from core import fatura
+    klasor, bilgi, v, fl, s, args_ = _satir_verisi(aid)
+    if v is None:
+        return render_template("faturalar.html", aid=aid, bilgi=bilgi, v=None)
+    h = fatura.satir_hesap(s)
+    sdurum = request.args.get("sdurum", "tum")
+    sdurum = sdurum if sdurum in fatura.SATIR_DURUM else "tum"
+    sirala = request.args.get("ssirala", "tarih")
+    yon = "azalan" if request.args.get("syon") == "azalan" else "artan"
+    g = fatura.satir_sirala(s, sdurum, sirala, yon)
+    try:
+        sayfa = max(1, int(request.args.get("sayfa", 1)))
+    except ValueError:
+        sayfa = 1
+    sayfa_say = max(1, -(-len(g) // SATIR_SAYFA_BOYU))
+    sayfa = min(sayfa, sayfa_say)
+    args = args_.to_dict(flat=False)
+
+    def url(yol=f"/satirlar/{aid}", **degis):
+        q = {k: v for k, v in args.items() if k not in degis}
+        for k, d in degis.items():
+            if d is not None:
+                q[k] = [d]
+        from urllib.parse import urlencode
+        return yol + "?" + urlencode(q, doseq=True)
+
+    def sirala_url(kolon):
+        y = "artan" if sirala == kolon and yon == "azalan" else "azalan"
+        return url(ssirala=kolon, syon=y, sayfa=None)
+
+    return render_template("satirlar.html", aid=aid, bilgi=bilgi, v=v, fl=fl, tur_grup=fatura.TUR_GRUP, h=h,
+                           s=g.iloc[(sayfa - 1) * SATIR_SAYFA_BOYU: sayfa * SATIR_SAYFA_BOYU], toplam=len(g),
+                           etki_toplam=float(g["etki"].sum()), sdurum=sdurum, satir_durum=fatura.SATIR_DURUM,
+                           sirala=sirala, yon=yon, sayfa=sayfa, sayfa_say=sayfa_say, url=url, sirala_url=sirala_url,
+                           sayfa_boyu=SATIR_SAYFA_BOYU,
+                           excel_url=url(f"/satirlar/{aid}/excel", sayfa=None),
+                           faturalar_url=url(f"/faturalar/{aid}", sayfa=None, sdurum=None, ssirala=None, syon=None))
+
+
+@app.route("/satirlar/<aid>/excel")
+def satirlar_excel(aid):
+    from core import fatura
+    klasor, bilgi, v, fl, s, _ = _satir_verisi(aid)
+    if v is None:
+        abort(404)
+    h = fatura.satir_hesap(s)
+    sdurum = request.args.get("sdurum", "tum")
+    g = fatura.satir_sirala(s, sdurum if sdurum in fatura.SATIR_DURUM else "tum", "tarih", "artan")
+    yol = os.path.join(klasor, f"Fatura_Satirlari_{re.sub(r'[^0-9A-Za-z-]', '', str(bilgi['firma']))}.xlsx")
+    fatura.satir_excel(g, h, yol, "Filtreli döküm." if fl.aktif_mi() else "Tüm faturaların satırları.")
     return send_file(yol, as_attachment=True)
 
 
@@ -1084,11 +1157,83 @@ def sil(aid):
 
 @app.context_processor
 def _surum():
-    return {"surum": __version__}
+    from core import guncelleme
+    try:
+        gn = guncelleme.ozet()
+    except Exception:   # güncelleme durumu okunamazsa sayfa yine açılsın
+        gn = None
+    return {"surum": __version__, "gn": gn}
+
+
+# ---------------------------------------------------------------------------- güncelleme
+def _geri(varsayilan="/"):
+    r = request.referrer or ""
+    from urllib.parse import urlsplit
+    u = urlsplit(r)
+    return (u.path + ("?" + u.query if u.query else "")) if u.path.startswith("/") and not u.path.startswith("//") else varsayilan
+
+
+@app.route("/guncelleme/durum")
+def guncelleme_durum():
+    from core import guncelleme
+    return jsonify(guncelleme.ozet())
+
+
+@app.route("/guncelleme/kontrol", methods=["POST"])
+def guncelleme_kontrol():
+    from core import guncelleme
+    son = guncelleme.kontrol(zorla=True)
+    if (son and son.get("yeni") and guncelleme.paketli_mi() and guncelleme.otomatik_mi() and guncelleme.yazilabilir_mi()
+            and (guncelleme.hazir() or {}).get("surum") != son["surum"]):
+        guncelleme.baslat_indirme(son)
+    return redirect(_geri("/ayarlar"))
+
+
+@app.route("/guncelleme/indir", methods=["POST"])
+def guncelleme_indir():
+    from core import guncelleme
+    son = guncelleme.kontrol()
+    if son and son.get("yeni") and guncelleme.paketli_mi():
+        guncelleme.baslat_indirme(son)
+    return redirect(_geri())
+
+
+@app.route("/guncelleme/otomatik", methods=["POST"])
+def guncelleme_otomatik():
+    from core import guncelleme
+    guncelleme.otomatik_ayarla(request.form.get("otomatik") == "1")
+    return redirect("/ayarlar")
+
+
+@app.route("/guncelleme/uygula", methods=["POST"])
+def guncelleme_uygula():
+    from core import guncelleme
+    if IS.calisiyor:
+        guncelleme.DURUM["hata"] = "Bir analiz sürüyor; bitince tekrar deneyin."
+        return redirect(_geri())
+    if guncelleme.paketli_mi():
+        h = guncelleme.hazir()
+        if not h:
+            return redirect(_geri())
+        hedef, yeni = (lambda: guncelleme.uygula(h)), h["surum"]
+    elif guncelleme.git_klasoru():
+        def hedef():
+            try:
+                guncelleme.git_guncelle()
+            except guncelleme.GuncellemeHatasi as e:
+                guncelleme.DURUM.update(hata=str(e), uyguluyor=False)
+                return
+            guncelleme.git_yeniden_baslat()
+        yeni = (guncelleme.kontrol() or {}).get("surum") or ""
+    else:
+        return redirect(_geri())
+    guncelleme.DURUM.update(uyguluyor=True, hata=None)
+    threading.Timer(1.0, hedef).start()   # önce bu sayfa tarayıcıya gitsin
+    return render_template("guncelleniyor.html", eski=__version__, yeni=yeni)
 
 
 # tarih filtresi çubuğunun göründüğü sayfalar
-_TARIHLI = {"panel", "abc_liste", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "kontrol_sayfa"}
+_TARIHLI = {"panel", "abc_liste", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "satirlar_sayfa", "kontrol_sayfa"}
 
 
 @app.context_processor
@@ -1108,7 +1253,7 @@ def _tarih_cubugu():
                    "etiket": f"{g(bas)} – {g(bit)}" if (bas or bit) else "",
                    "veri_bas": str(bilgi.get("tarih_bas") or "")[:10], "veri_bit": str(bilgi.get("tarih_bit") or "")[:10],
                    "hazir": _tarih_hazir(bilgi), "donus": request.full_path.rstrip("?"),
-                   "faturalar": request.endpoint == "faturalar_sayfa"}}
+                   "faturalar": request.endpoint in ("faturalar_sayfa", "satirlar_sayfa")}}
 
 
 def _bos_degil(v):
@@ -1167,6 +1312,18 @@ def main():
         from core import mcp_sunucu
         mcp_sunucu.calistir()
         return
+    from core import guncelleme
+    h = guncelleme.acilista_uygulanacak()
+    if h:   # önceki açılışta indirilen yeni sürüme geç (bu çağrı dönmez; program yeni sürümle yeniden başlar)
+        print(f"Logo Tiger Analiz {h['surum']} sürümüne güncelleniyor…")
+        try:
+            guncelleme.uygula(h)
+        except Exception as e:
+            print(f"Güncelleme uygulanamadı, {__version__} ile devam ediliyor: {e}")
+            tanilama.yaz(f"Güncelleme uygulanamadı: {e}")
+    if guncelleme.paketli_mi():
+        guncelleme.eski_kopyalari_temizle()
+    guncelleme.arka_planda()
     for akis in (sys.stdout, sys.stderr):  # Windows konsolunda/yönlendirmede Türkçe karakterler hata vermesin
         try:
             akis.reconfigure(encoding="utf-8", errors="replace")

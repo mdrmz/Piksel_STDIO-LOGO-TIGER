@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block baslik %}Fatura satırları — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% block icerik %}
+<style>
+  .filtre { display:grid; grid-template-columns:repeat(6,1fr); gap:10px 14px; align-items:end; }
+  .filtre label { margin:0 0 4px; } @media (max-width:1000px) { .filtre { grid-template-columns:repeat(2,1fr); } }
+  .turler { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13.5px; } .turler label { display:inline-flex; gap:5px; align-items:center; margin:0; color:var(--yazi); font-size:13.5px; }
+  .filtre input[type=date] { width:100%; padding:7px 9px; border:1px solid #CBD2DC; border-radius:6px; font:inherit; }
+  table.sat { font-size:12.5px; } table.sat td, table.sat th { white-space:nowrap; } table.sat td.ad { white-space:normal; min-width:160px; }
+  table.sat tr:hover td { background:#F7F9FC; } th a { color:inherit; text-decoration:none; } th a:hover { color:var(--mavi); }
+  tr.disarida td { color:#9AA1AC; } tr.disarida td.neden { color:var(--uyari); }
+  td.ham { color:var(--soluk); } td.etki { font-weight:600; } td.etki.eksi { color:#B42318; }
+  .logo-ref { font:11.5px ui-monospace, Menlo, Consolas, monospace; color:var(--soluk); }
+  .hesap td { padding:5px 10px; } .hesap td.s { min-width:150px; } .hesap tr.toplam td { border-top:2px solid var(--lacivert); font-weight:700; font-size:15px; }
+  .sayfalar a, .sayfalar span { margin-right:6px; }
+</style>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>Fatura satırları <span class="soluk" style="font-size:15px;font-weight:400">— rakamlar nereden geliyor</span></h1>
+    <div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }} · <a href="/panel/{{ aid }}">Panele dön</a> · <a href="{{ faturalar_url }}">Fatura fatura liste</a></div>
+  </div>
+  <div style="display:flex;gap:8px"><a class="btn" href="{{ excel_url }}">Excel'e indir{% if fl.aktif_mi() %} (filtreli){% endif %}</a></div>
+</div>
+
+{% if not h.ham_var %}
+<div class="uyari" style="margin-top:14px">Bu analiz önceki bir sürümle oluşturulduğu için Logo'nun ham alanları (<code>TOTAL</code>, <code>DISTDISC</code>,
+  <code>VATMATRAH</code>) boş görünüyor. Hesap yine doğrudur; ham alanları da görmek için yedeği yeniden açıp analizi baştan oluşturun.</div>
+{% endif %}
+
+<form class="kart" method="get" style="margin-top:16px">
+  <div class="filtre">
+    <div><label>Başlangıç</label><input type="date" name="bas" value="{{ fl.bas }}"></div>
+    <div><label>Bitiş</label><input type="date" name="bit" value="{{ fl.bit }}"></div>
+    <div><label>Cari (kod ya da ad)</label><input type="text" name="cari" value="{{ fl.cari }}" placeholder="ör. 120.01 ya da ABC Ltd"></div>
+    <div><label>Ürün (kod ya da ad)</label><input type="text" name="urun" value="{{ fl.urun }}"></div>
+    <div><label>Fatura / belge no</label><input type="text" name="no" value="{{ fl.no }}"></div>
+    <div><label>Ambar</label><select name="ambar"><option value="">Tümü</option>
+      {% for a in v.ambarlar %}<option value="{{ a.ambar }}" {{ 'selected' if fl.ambar == a.ambar }}>{{ a.ambar_ad }}</option>{% endfor %}</select></div>
+  </div>
+  <div style="display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
+    <div><label>Fatura türü</label><div class="turler">
+      {% for k, (ad, _) in tur_grup.items() %}<label><input type="checkbox" name="tur" value="{{ k }}" {{ 'checked' if k in fl.tur }}> {{ ad }}</label>{% endfor %}</div></div>
+    <div style="min-width:220px"><label>Satırlar</label><select name="sdurum">
+      {% for k, ad in satir_durum.items() %}<option value="{{ k }}" {{ 'selected' if sdurum == k }}>{{ ad }}</option>{% endfor %}</select></div>
+    {% if fl.cari_kod %}<input type="hidden" name="cari_kod" value="{{ fl.cari_kod }}">{% endif %}
+    {% if fl.urun_kod %}<input type="hidden" name="urun_kod" value="{{ fl.urun_kod }}">{% endif %}
+    {% if fl.durum != 'tum' %}<input type="hidden" name="durum" value="{{ fl.durum }}">{% endif %}
+    <div style="margin-left:auto;display:flex;gap:8px"><button class="btn">Filtrele</button>
+      <a class="btn ikincil" href="/satirlar/{{ aid }}">Temizle</a></div>
+  </div>
+  {% if fl.cari_kod or fl.urun_kod %}<div class="kucuk" style="margin-top:10px">
+    {% if fl.urun_kod %}Ürün: <b>{{ fl.urun_kod }}</b> <a href="{{ url(urun_kod=None, sayfa=None) }}">✕ kaldır</a>{% endif %}
+    {% if fl.cari_kod %}{% if fl.urun_kod %} · {% endif %}Cari: <b>{{ fl.cari_kod }}</b> <a href="{{ url(cari_kod=None, sayfa=None) }}">✕ kaldır</a>{% endif %}
+  </div>{% endif %}
+</form>
+
+<div class="izgara i2" style="margin-top:16px">
+  <div class="kart">
+    <h3>Hesap (KDV hariç)</h3>
+    <table class="hesap">
+      <tr><td>Satış satırları <span class="soluk kucuk">TRCODE 7, 8</span></td><td class="s">{{ h.satis.tutar|tl(2) }} ₺</td><td class="soluk kucuk">{{ h.satis.satir|tl }} satır · {{ h.satis.fatura|tl }} fatura</td></tr>
+      <tr><td>− Satış iadesi satırları <span class="soluk kucuk">TRCODE 2, 3</span></td><td class="s">{{ h.satis_iade.tutar|tl(2) }} ₺</td><td class="soluk kucuk">{{ h.satis_iade.satir|tl }} satır · {{ h.satis_iade.fatura|tl }} fatura</td></tr>
+      <tr class="toplam"><td>= Net satış</td><td class="s">{{ h.net_satis|tl(2) }} ₺</td><td></td></tr>
+      <tr><td colspan="3" style="border:0;height:8px"></td></tr>
+      <tr><td>Alış satırları <span class="soluk kucuk">TRCODE 1</span></td><td class="s">{{ h.alis.tutar|tl(2) }} ₺</td><td class="soluk kucuk">{{ h.alis.satir|tl }} satır · {{ h.alis.fatura|tl }} fatura</td></tr>
+      <tr><td>− Alış iadesi satırları <span class="soluk kucuk">TRCODE 6</span></td><td class="s">{{ h.alis_iade.tutar|tl(2) }} ₺</td><td class="soluk kucuk">{{ h.alis_iade.satir|tl }} satır</td></tr>
+      <tr class="toplam"><td>= Net alış</td><td class="s">{{ h.net_alis|tl(2) }} ₺</td><td></td></tr>
+    </table>
+    <p class="kucuk soluk" style="margin:10px 0 0">Filtre yokken net satış paneldeki <b>Net satış</b> ile aynıdır. Her satırın tutarı Logo'daki
+      <code>VATMATRAH</code> alanıdır: KDV hariç, dip indirim/masraf satırlara dağıtılmış hali (<code>TOTAL − DISTDISC</code> ± masraf).</p>
+  </div>
+  <div class="kart">
+    <h3>Hesaba girmeyen satırlar</h3>
+    {% if h.disarida %}
+    <table>
+      <tr><th>Neden</th><th class="s">Satır</th><th class="s">Tutar (KDV hariç)</th></tr>
+      {% for d in h.disarida %}<tr><td>{{ d.durum }}</td><td class="s">{{ d.satir|tl }}</td><td class="s">{{ d.tutar|tl(2) }}</td></tr>{% endfor %}
+    </table>
+    <p class="kucuk" style="margin:10px 0 0"><a href="{{ url(sdurum='disarida', sayfa=None) }}">Bu satırları tek tek gör ›</a></p>
+    {% else %}<p class="soluk kucuk">Bu filtrede hesaba girmeyen satır yok.</p>{% endif %}
+    <p class="kucuk soluk" style="margin:10px 0 0">İptal satırları, indirim/masraf/promosyon satırları, transfer gibi satış-alış olmayan hareketler
+      ve <a href="/haric/{{ aid }}">hesaplama dışı</a> bıraktığınız faturalar rakamlara girmez.</p>
+  </div>
+</div>
+
+<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:16px;flex-wrap:wrap;gap:8px">
+  <div><b>{{ toplam|tl }}</b> satır{% if sdurum != 'tum' %} ({{ satir_durum[sdurum]|lower }}){% endif %} · hesaba giren tutar toplamı <b>{{ etki_toplam|tl(2) }} ₺</b></div>
+  <div class="kucuk soluk">Satıra tıklayınca fatura açılır. Gri satırlar hesaba girmez; nedeni "Durum" sütununda.</div>
+</div>
+<div class="kart" style="padding:6px 10px;margin-top:8px;overflow-x:auto">
+<table class="sat">
+  {% macro th(kolon, ad, sag=False, ipucu='') %}<th class="{{ 's' if sag }}" title="{{ ipucu }}"><a href="{{ sirala_url(kolon) }}">{{ ad }}{% if sirala == kolon %} {{ '▲' if yon == 'artan' else '▼' }}{% endif %}</a></th>{% endmacro %}
+  <tr>{{ th('tarih','Tarih') }}{{ th('fatura_no','Fatura') }}{{ th('cari_ad','Cari') }}{{ th('malzeme_ad','Malzeme') }}<th>Ambar</th><th>Satır tipi</th>
+    {{ th('miktar','Miktar', True, 'Ana birime çevrilmiş: AMOUNT × UINFO2 / UINFO1') }}<th class="s" title="Logo PRICE">Birim fiyat</th>
+    <th class="s" title="Logo TOTAL: miktar × fiyat">TOTAL</th><th class="s" title="Logo DISTDISC: satıra dağıtılan dip indirim">DISTDISC</th>
+    <th class="s" title="Logo VATMATRAH: KDV hariç net">VATMATRAH</th>
+    {{ th('net_tutar','Tutar', True, 'Programın kullandığı KDV hariç tutar') }}{{ th('etki','Hesaba giren', True, 'Net satış / alışa etkisi; iadeler eksi') }}
+    {{ th('durum','Durum') }}<th>Logo kaydı</th></tr>
+  {% for r in s.itertuples() %}
+  {% set link = '/fatura/' ~ aid ~ '?d=' ~ (r.donem|string|urlencode) ~ '&r=' ~ r.fatura_ref %}
+  <tr class="{{ '' if r.durum == 'Analizde' else 'disarida' }}" style="cursor:pointer" onclick="location.href='{{ link }}'">
+    <td>{{ r.tarih.strftime('%d.%m.%Y') if r.tarih == r.tarih else '' }}</td>
+    <td><a href="{{ link }}">{{ r.fatura_no or '(no yok)' }}</a><div class="kucuk soluk">{{ r.fatura_tur }}</div></td>
+    <td class="ad">{{ r.cari_ad }}<div class="kucuk soluk">{{ r.cari_kod }}</div></td>
+    <td class="ad">{{ r.malzeme_ad if r.malzeme_ad == r.malzeme_ad else '' }}<div class="kucuk soluk">{{ r.malzeme_kod if r.malzeme_kod == r.malzeme_kod else '' }}</div></td>
+    <td>{{ r.ambar_ad }}</td>
+    <td>{{ r.satir_tipi }}</td>
+    <td class="s" title="{% if r.logo_miktar == r.logo_miktar %}Logo AMOUNT {{ r.logo_miktar|tl(2) }} × {{ r.birim_katsayi|tl(4) }}{% endif %}">{{ r.miktar|tl(2) }}</td>
+    <td class="s ham">{{ r.birim_fiyat|tl(2) }}</td>
+    <td class="s ham">{{ r.logo_total|tl(2) }}</td>
+    <td class="s ham">{{ r.logo_distdisc|tl(2) }}</td>
+    <td class="s ham">{{ r.logo_vatmatrah|tl(2) }}</td>
+    <td class="s" title="{{ 'Kaynak alan: ' ~ r.tutar_kaynagi if r.tutar_kaynagi == r.tutar_kaynagi else '' }}">{{ r.net_tutar|tl(2) }}</td>
+    <td class="s etki {{ 'eksi' if r.etki < 0 }}" title="{{ r.hesap }}">{% if r.durum == 'Analizde' and r.hesap %}{{ r.etki|tl(2) }}{% else %}–{% endif %}</td>
+    <td class="neden">{% if r.durum == 'Analizde' %}<span class="rozet rA">{{ r.hesap or 'Analizde' }}</span>{% else %}{{ r.durum }}{% endif %}</td>
+    <td class="logo-ref">{{ r.satir_tablo }} · ref {{ r.satir_ref }}</td>
+  </tr>
+  {% else %}<tr><td colspan="15" class="soluk">Filtreye uyan satır yok.</td></tr>{% endfor %}
+</table>
+</div>
+{% if sayfa_say > 1 %}
+<div class="sayfalar kucuk" style="margin-top:12px">
+  {% if sayfa > 1 %}<a href="{{ url(sayfa=(sayfa - 1)|string) }}">‹ Önceki</a>{% endif %}
+  <span class="soluk">Sayfa {{ sayfa }} / {{ sayfa_say }} · sayfa başına {{ sayfa_boyu }} satır · tamamı için Excel'e indirin</span>
+  {% if sayfa < sayfa_say %}<a href="{{ url(sayfa=(sayfa + 1)|string) }}">Sonraki ›</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

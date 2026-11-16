@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block baslik %}Güncelleniyor — Logo Tiger Analiz{% endblock %}
+{% block icerik %}
+<div class="kart" style="max-width:640px;margin:40px auto;text-align:center">
+  <h1>Güncelleniyor…</h1>
+  <p>v{{ eski }} → <b>v{{ yeni or 'yeni sürüm' }}</b></p>
+  <p class="soluk" id="mesaj">Program kapanıp yeni sürümle yeniden açılıyor. Bu sayfa kendiliğinden yenilenir; siyah pencereyi kapatmayın.</p>
+  <p class="kucuk soluk">Analizleriniz, ayarlarınız ve SQL Server kurulumu yerinde kalır.</p>
+  <p class="uyari" id="hata" style="display:none;text-align:left"></p>
+</div>
+<script>
+(() => {
+  const eski = {{ eski|tojson }};
+  let deneme = 0;
+  const bak = async () => {
+    deneme++;
+    try {
+      const d = await (await fetch('/guncelleme/durum', {cache: 'no-store'})).json();
+      if (d.surum !== eski) { location.href = '/'; return; }
+      if (d.hata && deneme > 2) { const h = document.getElementById('hata'); h.textContent = d.hata; h.style.display = 'block';
+        document.getElementById('mesaj').textContent = 'Güncelleme yapılamadı; program eski sürümle çalışmaya devam ediyor.'; return; }
+    } catch (e) { /* program yeniden başlıyor */ }
+    if (deneme > 150) { document.getElementById('mesaj').textContent = 'Program açılmadı. Programı elle başlatın.'; return; }
+    setTimeout(bak, 1500);
+  };
+  setTimeout(bak, 2500);
+})();
+</script>
+{% endblock %}

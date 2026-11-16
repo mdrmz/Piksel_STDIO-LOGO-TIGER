@@ -71,6 +71,10 @@
     <div class="ad">Net alış (KDV hariç)<span class="git">fatura fatura gör ›</span></div><div class="deger">{{ o.net_alis|tl }} ₺</div>
     <div class="kucuk soluk">{{ o.tedarikci_sayisi }} tedarikçi</div></{{ kt }}>
 </div>
+{% if fatura_var %}<div class="kucuk" style="margin:8px 2px 0"><b>Bu rakamlar nereden geliyor?</b>
+  <a href="/satirlar/{{ aid }}?tur=satis&tur=satis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">Net satışı satır satır gör ›</a> ·
+  <a href="/satirlar/{{ aid }}?tur=alis&tur=alis_iade{{ '&ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">Net alışı satır satır gör ›</a> ·
+  <a href="/satirlar/{{ aid }}{{ '?ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">Tüm faturaların tüm satırları ›</a></div>{% endif %}
 
 {% if eski_surum %}
 <div class="uyari" style="margin-top:16px">Bu analiz programın önceki sürümüyle oluşturulmuş. Kârlılık, alacak yaşlandırma ve depo

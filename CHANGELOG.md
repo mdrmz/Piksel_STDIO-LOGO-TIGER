@@ -1,5 +1,28 @@
 # Değişiklik günlüğü
 
+## v0.10.0 — 2026-11-16
+Rakamların nereden geldiğini satır satır gösteren döküm ve otomatik güncelleme.
+- **Fatura satırları ekranı ("rakamlar nereden geliyor"):** tüm faturaların tüm satırları tek listede. Her satırda
+  tarih, fatura, cari, malzeme, ambar, satır tipi, miktar ve Logo'nun ham alanları (`PRICE`, `TOTAL`, `DISTDISC`,
+  `VATMATRAH`) ile programın kullandığı tutar, **hesaba giren tutar** (iadeler eksi) ve hesaba girmiyorsa nedeni
+  (iptal, indirim/masraf satırı, transfer, hesaplama dışı…) yazar; Logo'da bulmak için tablo adı + `LOGICALREF`.
+  Üstte **Hesap** kutusu: satış satırları − iade satırları = net satış, alış − alış iadesi = net alış; filtre yokken
+  paneldeki rakamın kendisi. Yanında hesaba girmeyen satırlar nedenlerine göre adet ve tutarıyla.
+  Faturalar ekranındaki tüm filtreler (tarih, cari, ürün, fatura no, ambar, tür) ve "sadece hesaba girenler /
+  girmeyenler" seçimi; sütunlara göre sıralama. **Excel'e indir**: Hesap + tüm satırlar (ham alanlarla) tek dosyada.
+  Panelde **Bu rakamlar nereden geliyor?** bağlantıları, Faturalar ekranında **Satır satır döküm** düğmesi.
+  Fatura detayında da her satırın `TOTAL` / `DISTDISC` / `VATMATRAH` değeri görünür; Faturalar Excel'inin satır
+  sayfasına da eklendi. Ham alanlar yeni analizlerde okunur; önceki analizlerde hesap yine doğru, ham alanlar boştur.
+- **Otomatik güncelleme:** program açılışta (en fazla 6 saatte bir) GitHub'daki en son sürüme bakar. Yeni sürüm varsa
+  arka planda indirir, GitHub'ın verdiği SHA-256 ile doğrular ve hazırlar; program bir sonraki açılışında kendini
+  günceller. Beklemek istemeyenler için sayfanın üstünde **Şimdi güncelle** düğmesi. Analizler, ayarlar, API anahtarı
+  ve SQL Server kurulumu korunur. Windows'ta küçük bir betik program kapanınca klasörü değiştirip yeni sürümü açar;
+  macOS/Linux'ta aynı pencerede yeni sürüme geçilir. Değiştirme yarıda kalırsa eski sürüm geri konur; açılışta en
+  fazla iki kez denenir. İnternet yoksa sessizce atlanır. **Ayarlar** sayfasında kurulu/en son sürüm, **Şimdi kontrol
+  et** ve **Otomatik güncelle** seçeneği. Kaynak koddan (git) çalışırken **git pull ile güncelle** düğmesi çıkar.
+  Program yazılamayan bir klasördeyse (ör. Program Files) indirme sayfasına yönlendirilir.
+- Faturalar ekranında üstteki tarih çubuğunun kutuları tam genişliğe yayılıyordu; düzeltildi.
+
 ## v0.9.0 — 2026-11-14
 Tüm ekranlarda tarih filtresi, Logo ile farklı faturaların nedeni, "nan" görünen yerlerin temizlenmesi.
 - **Tarih filtresi (her ekranda):** sayfanın üstündeki çubuktan başlangıç–bitiş tarihi seçilir ya da hızlı düğmelerle
