@@ -458,7 +458,14 @@ class BakKaynak(MssqlKaynak):
         (ör. kullanıcı klasörü) izinlerini korur ve servis onu okuyamaz (Operating system error 5); önce izinler
         yeni klasörden yeniden alınır, sonra servise açıkça okuma izni verilir."""
         if not _WINDOWS:
-            return True
+            # macOS/Linux (Docker): SQL Server konteynerde başka bir kullanıcıyla (mssql, uid 10001) çalışır.
+            # Tarayıcıdan yüklenen yedek geçici dosyadan taşındığında yalnızca sahibinin okuyabildiği izinle (0600)
+            # gelir; herkese okuma izni verilmezse "Operating system error 5 (Access is denied)" alınır.
+            try:
+                os.chmod(dosya, (os.stat(dosya).st_mode & 0o7777) | 0o444)
+                return True
+            except OSError:
+                return False
         _icacls(dosya, "/reset")
         hesap = self._servis_hesabi()
         return bool(hesap and _icacls(dosya, "/grant", f"{hesap}:R")) or _icacls(dosya, "/grant", "*S-1-1-0:R")
@@ -593,7 +600,7 @@ class BakKaynak(MssqlKaynak):
         except Exception as e:
             if "error 5(" in str(e):
                 raise KaynakHatasi(
-                    "SQL Server yedek dosyasını okuyamadı (Windows: erişim engellendi). Yedeği seçmek yerine "
+                    "SQL Server yedek dosyasını okuyamadı (erişim engellendi). Yedeği seçmek yerine "
                     "\"…ya da dosyanın tam yolu\" kutusuna tam yolunu yazın; olmazsa dosyayı "
                     f"{os.path.dirname(self._kopya or yol)} klasörüne kopyalayıp oradaki yolunu yazın. "
                     f"Ayrıntı: {str(e)[:300]}") from e
