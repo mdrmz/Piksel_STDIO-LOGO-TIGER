@@ -1,5 +1,19 @@
 # Değişiklik günlüğü
 
+## v0.12.0 — 2026-11-16
+**En çok satanlar:** seçilen tarih aralığında (ör. sadece Ekim) en çok satılan ürünler, kârdan bağımsız.
+- Panelde **En çok satılan ürünler** kutusu: "Bu dönemde en çok satılan ürün: …" satırı ve ilk 10 ürün; **Tutara göre**
+  (net satış TL) ya da **Adede göre** (net satılan miktar). Üstte **En çok satanlar** düğmesi tüm listeyi açar: net
+  satış, net miktar, iade miktarı, ortalama fiyat, fatura ve müşteri sayısı, ciro payı, son satış, brüt kâr, marj ve
+  **Kâr sırası** (aynı ürün kârlılığa göre ABC'de kaçıncı). Arama kutusu ve **Excel'e indir** (tutara ve miktara göre
+  iki sayfa). Tarih filtresi ve ambar seçimi uygulanır.
+- Neden: ABC varsayılan olarak **kârlılığa** göre sıralı olduğundan listenin başı en çok kâr getiren üründü, en çok
+  satılan değil; ayrıca maliyeti bilinmeyen ürünler (alışı başka firmada ya da dönemde kalan) kâr ABC'sine hiç
+  girmiyordu. En çok satanlar listesinde bu ürünler de var (kâr sütunu boş).
+- Ürün ABC ekranında bu fark yazıyor ve kâr ABC'sine girmeyen ürünlerin sayısı ve satış tutarı gösteriliyor
+  (müşteri ABC'sinde de).
+- Excel raporuna **En Çok Satanlar** sayfası (Özet'ten hemen sonra).
+
 ## v0.11.0 — 2026-11-16
 Karşılaştırmalar: dönem/yıl, cari ve firma. Panelde **Karşılaştır** düğmesi.
 - **Dönem / yıl karşılaştırma:** iki tarih aralığı yan yana. Hazır seçimler verinin kapsadığı tarihlere göre çıkar:

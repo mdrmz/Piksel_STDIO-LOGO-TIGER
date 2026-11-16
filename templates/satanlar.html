@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block baslik %}En çok satanlar — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% block icerik %}
+<style> table.st tr:hover td { background:#F7F9FC; } .birinci { font-size:16px; } </style>
+<p class="kucuk"><a href="/panel/{{ aid }}{{ '?ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">‹ Panele dön</a></p>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>En çok satılan ürünler <span class="soluk" style="font-weight:400;font-size:16px">· {{ donem }}{% if ambar_secili is not none %} · {{ ambar_secili_ad }}{% endif %} · {{ t|length }} ürün</span></h1>
+    <p style="margin:8px 0">
+      <a class="btn kucuk {{ '' if sira == 'tutar' else 'ikincil' }}" href="/satanlar/{{ aid }}?sira=tutar{{ aq }}">Tutara göre (TL)</a>
+      <a class="btn kucuk {{ '' if sira == 'miktar' else 'ikincil' }}" href="/satanlar/{{ aid }}?sira=miktar{{ aq }}">Adede / miktara göre</a></p>
+  </div>
+  <a class="btn" href="/satanlar/{{ aid }}/excel?sira={{ sira }}{{ aq }}">Excel'e indir</a>
+</div>
+<p class="soluk kucuk" style="max-width:900px">Üstteki tarih filtresinde seçtiğiniz aralıkta (ör. sadece Ekim) satılan ürünler, {{ 'net satılan miktara' if sira == 'miktar' else 'net satış tutarına' }} göre
+  büyükten küçüğe. İadeler düşülmüş, KDV hariç. <b>Kârdan bağımsızdır</b>: maliyeti bilinmeyen ürünler de listededir (kâr sütunu boş).
+  "Kâr sırası" aynı ürünün kârlılığa göre ABC'de kaçıncı olduğunu gösterir; ABC listesinin başı en çok kâr getiren, bu listenin başı en çok satılan üründür.
+  Miktarlar her ürünün kendi ana biriminde (adet, kg, m…).</p>
+
+{% if t|length %}{% set b = t.iloc[0] %}
+<div class="kart birinci" style="margin:12px 0">1. sırada: <a href="/urun/{{ aid }}?kod={{ b.malzeme_kod|urlencode }}"><b>{{ b.malzeme_ad }}</b></a>
+  <span class="soluk">({{ b.malzeme_kod }})</span> — <b>{{ b.net_tutar|tl }} ₺</b> · {{ b.net_miktar|tl }} adet/birim ·
+  {{ b.fatura_sayisi|tl }} fatura · {{ b.musteri_sayisi|tl }} müşteri · cironun {{ b.pay|yuzde }}'i
+  <span class="kucuk soluk">(toplam net satış {{ o.net_satis|tl }} ₺)</span></div>
+
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+  <input type="text" id="ara" placeholder="Kod, ad ya da grup ara…" style="max-width:320px"><span class="kucuk soluk" id="sayac"></span></div>
+<div class="kart" style="padding:6px 10px;overflow-x:auto"><table class="st" id="tablo">
+  <tr><th class="s">Sıra</th><th>Ürün</th><th>Grup</th><th class="s">Net satış (₺)</th><th class="s">Net miktar</th><th class="s">İade miktarı</th>
+    <th class="s">Ort. fiyat</th><th class="s">Fatura</th><th class="s">Müşteri</th><th class="s">Pay</th><th>Son satış</th>
+    {% if kar_var %}<th class="s">Brüt kâr</th><th class="s">Marj</th><th class="s" title="Kârlılığa göre ABC'de kaçıncı">Kâr sırası</th>{% endif %}</tr>
+  {% for r in t.head(2000).itertuples() %}
+  <tr><td class="s">{{ r.sira }}</td>
+      <td><a href="/urun/{{ aid }}?kod={{ r.malzeme_kod|urlencode }}" title="Ürün kartı: aylık satış, kime ne kadar">{{ r.malzeme_ad }}</a><div class="kucuk soluk">{{ r.malzeme_kod }}</div></td>
+      <td>{{ r.grup_kod }}</td><td class="s"><b>{{ r.net_tutar|tl(2) }}</b></td><td class="s">{{ r.net_miktar|tl }}</td>
+      <td class="s">{% if r.iade_miktar %}{{ r.iade_miktar|tl }}{% endif %}</td><td class="s">{{ r.ort_fiyat|tl(2) }}</td>
+      <td class="s">{{ r.fatura_sayisi|tl }}</td><td class="s">{{ r.musteri_sayisi|tl }}</td><td class="s">{{ r.pay|yuzde }}</td><td>{{ r.son_satis }}</td>
+      {% if kar_var %}<td class="s">{{ r.brut_kar|tl }}</td><td class="s">{{ r.kar_marji|yuzde }}</td>
+      <td class="s">{% if r.kar_sira == r.kar_sira and r.kar_sira is not none %}{{ r.kar_sira|int }}.{% else %}<span class="soluk" title="Maliyeti bilinmiyor: bu firmada/dönemde alış ya da devir kaydı yok">–</span>{% endif %}</td>{% endif %}</tr>
+  {% endfor %}
+</table>
+{% if t|length > 2000 %}<p class="kucuk soluk">İlk 2.000 ürün; tamamı Excel'de.</p>{% endif %}</div>
+<script>
+  const ara = document.getElementById('ara'), satirlar = [...document.querySelectorAll('#tablo tr')].slice(1), sayac = document.getElementById('sayac');
+  ara.addEventListener('input', () => {
+    const q = ara.value.toLocaleLowerCase('tr'); let n = 0;
+    satirlar.forEach(tr => { const g = !q || tr.textContent.toLocaleLowerCase('tr').includes(q); tr.style.display = g ? '' : 'none'; if (g) n++; });
+    sayac.textContent = q ? n + ' ürün' : '';
+  });
+</script>
+{% else %}<div class="kart"><p style="margin:0">Seçilen tarih aralığında satış yok. Üstteki tarih filtresini değiştirin.</p></div>{% endif %}
+{% endblock %}

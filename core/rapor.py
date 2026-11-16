@@ -50,6 +50,9 @@ YUZDE = {"pay", "kumulatif_pay", "yillik_degisim", "kalem_payi", "deger_payi", "
 SAYI = {"toplam_miktar", "satis_miktar", "miktar", "stok_miktar", "yillik_satis", "stok_gun", "oneri_miktar", "sessiz_gun", "en_eski_gun"}
 ONDALIK = {"devir_hizi", "gunluk_satis", "ort_aralik_gun"}
 PARA.add("ort_fiyat")
+BASLIK.update({"net_miktar": "Net satılan miktar", "iade_miktar": "İade miktarı", "musteri_sayisi": "Müşteri sayısı",
+               "kar_sira": "Kâr ABC'deki sırası"})
+SAYI.update({"net_miktar", "iade_miktar", "kar_sira", "fatura_sayisi", "musteri_sayisi"})
 DURUM_RENK = {"Kayıp": "sC", "Risk": "sB", "Acil": "sC", "Sipariş ver": "sB"}
 MALIYET_NOTU = ("Tahmini brüt kâr = net satış − (satış miktarı × o tarihteki son alış fiyatı). "
                 "Yönetim amaçlı tahmindir; muhasebe kârı değildir.")
@@ -173,6 +176,36 @@ def _yaslandirma_sayfa(wb, f, ad, baslik, df, ozet_satir):
     return ws
 
 
+SATAN_KOLON = ["sira", "malzeme_kod", "malzeme_ad", "grup_kod", "net_tutar", "net_miktar", "satis_miktar", "iade_miktar",
+               "ort_fiyat", "fatura_sayisi", "musteri_sayisi", "son_satis", "pay", "brut_kar", "kar_marji", "kar_sira"]
+
+
+def _satanlar_sayfa(wb, f, a: Analiz, sira: str, ad: str):
+    t = a.en_cok_satanlar(sira)
+    donem = a.tarih_etiketi() or "tüm dönem"
+    ne = "Net satılan miktara" if sira == "miktar" else "Net satış tutarına (TL)"
+    ilk = (f" 1. sırada: {t.iloc[0]['malzeme_ad']} ({t.iloc[0]['malzeme_kod']})." if len(t) else "")
+    ws = _liste_sayfa(wb, f, ad, f"En çok satılan ürünler — {donem}" + (f" — {a.ambar_secili_ad} ambarı" if a.ambar_secili is not None else ""),
+                      f"{ne} göre sıralı; iadeler düşülmüş, KDV hariç.{ilk} Kârdan bağımsızdır: maliyeti bilinmeyen "
+                      "ürünler de listededir (kâr sütunu boş). \"Kâr ABC'deki sırası\" aynı ürünün kârlılığa göre kaçıncı olduğunu gösterir.",
+                      t[SATAN_KOLON], "Bu aralıkta satış yok.")
+    return ws
+
+
+def en_cok_satanlar_excel(a: Analiz, yol: str, sira: str = "tutar", firma: str = "") -> str:
+    """Yalnızca en çok satanlar: iki sayfa (tutara göre, miktara göre)."""
+    import xlsxwriter
+    wb = xlsxwriter.Workbook(yol, {"nan_inf_to_errors": True})
+    f = _fmt(wb)
+    birinci, ikinci = (("miktar", "Miktara göre"), ("tutar", "Tutara göre")) if sira == "miktar" else (("tutar", "Tutara göre"), ("miktar", "Miktara göre"))
+    for s, ad in (birinci, ikinci):
+        ws = _satanlar_sayfa(wb, f, a, s, ad)
+        if firma:
+            ws.write(2, 0, firma, f["not"])
+    wb.close()
+    return yol
+
+
 def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_md: str | None = None):
     with pd.ExcelWriter(yol, engine="xlsxwriter") as xw:
         wb = xw.book
@@ -248,6 +281,9 @@ def excel_raporu(a: Analiz, yol: str, olu_stok_gun: int = 90, esik=None, yorum_m
                 else:
                     ws.write(r, 0, _re.sub(r"\*\*(.+?)\*\*", r"\1", satir.strip()), sarili)
                 r += 1
+
+        # ---- en çok satanlar (kârdan bağımsız; seçilen tarih aralığına göre)
+        _satanlar_sayfa(wb, f, a, "tutar", "En Çok Satanlar")
 
         # ---- ABC sayfaları
         for seviye, sayfa_ad, ne in (("malzeme", "Ürün ABC (Kâr)", "Ürün"), ("cari", "Müşteri ABC (Kâr)", "Müşteri")):

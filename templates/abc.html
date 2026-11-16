@@ -16,6 +16,14 @@
   {% else %}{{ 'Net alış' if tur == 'tedarikci' else 'Net satış' }} tutarına göre (KDV hariç, iadeler düşülmüş).{% endif %}
   A: {{ 'kârın' if olcut == 'kar' else 'tutarın' }} ilk {{ esik.a|yuzde }}'i · B: {{ esik.b|yuzde }}'e kadar · C: kalanı.
   {% if fatura_var %}<b>Faturalar</b>'a tıklayınca bu tutarı oluşturan faturalar tek tek açılır; Logo ile oradan sağlayabilirsiniz.{% endif %}</p>
+{% if tur == 'urun' %}<div class="uyari" style="margin:10px 0;background:#F5F8FD;border-color:#C9D6EA;color:var(--yazi)">
+  {% if olcut == 'kar' %}Bu liste <b>en çok kâr getirenlere</b> göre sıralı; 1. sıradaki ürün en çok <b>satılan</b> ürün olmayabilir.{% else %}Bu liste net satış tutarına göre sıralı.{% endif %}
+  En çok satılan ürünler (tutara ya da adede göre, seçili tarih aralığında):
+  <a class="btn kucuk" href="/satanlar/{{ aid }}{{ '?ambar=' ~ ambar_secili if ambar_secili is not none else '' }}">En çok satanlar ›</a>
+  {% if kar_disi %}<br><span class="kucuk">Maliyeti bilinmeyen (bu firmada/dönemde alış ya da devir kaydı olmayan) <b>{{ kar_disi.adet|tl }} ürün</b>
+    ({{ kar_disi.tutar|tl }} ₺ satış) kâr ABC'sinde yok; "Ciroya göre" ve "En çok satanlar" listesinde var.</span>{% endif %}
+</div>{% elif tur == 'musteri' and kar_disi %}<div class="uyari kucuk" style="margin:10px 0">Maliyeti bilinmeyen ürünler aldığı için kârı hesaplanamayan
+  <b>{{ kar_disi.adet|tl }} müşteri</b> ({{ kar_disi.tutar|tl }} ₺) bu listede yok; "Ciroya göre" listede var.</div>{% endif %}
 
 <div class="izgara i3" style="margin:12px 0">
   {% for r in ozet.itertuples() %}

@@ -213,7 +213,8 @@ def test_sayfalarda_nan_yazmaz(kirli, tmp_path, monkeypatch):
     ay = con.execute("SELECT substr(MAX(tarih), 1, 7) FROM fact_satis").fetchone()[0]
     sayfalar = [f"/panel/{aid}", f"/panel/{aid}?abc=ciro", f"/abc/{aid}/urun", f"/abc/{aid}/musteri", f"/abc/{aid}/tedarikci",
                 f"/urun/{aid}?kod=KARTSIZ-M888888", f"/cari/{aid}?kod={kontrol.CARISIZ_KOD}", f"/cari/{aid}?kod=KARTSIZ-C999999",
-                f"/ay/{aid}?ay={ay}", f"/faturalar/{aid}", f"/faturalar/{aid}?durum=fark", f"/kontrol/{aid}", f"/ara/{aid}?q=a"]
+                f"/ay/{aid}?ay={ay}", f"/faturalar/{aid}", f"/faturalar/{aid}?durum=fark", f"/kontrol/{aid}", f"/ara/{aid}?q=a",
+                f"/satanlar/{aid}", f"/satanlar/{aid}?sira=miktar", f"/panel/{aid}?satan=miktar"]
     for etiket, aralik in (("filtresiz", None), ("filtreli", "2025-01-01|2025-12-31")):
         if aralik:
             r = c.post(f"/tarih/{aid}", data={"aralik": aralik, "donus": f"/panel/{aid}"})
@@ -231,6 +232,7 @@ def test_sayfalarda_nan_yazmaz(kirli, tmp_path, monkeypatch):
     for tur in ("excel", "pdf", "yzpaket", "powerbi"):
         assert c.get(f"/indir/{aid}/{tur}").status_code == 200, tur
     assert c.get(f"/kontrol/{aid}/excel").status_code == 200
+    assert c.get(f"/satanlar/{aid}/excel?sira=miktar").status_code == 200
     # Power BI paketindeki satışlar da seçilen aralıkta
     import zipfile
     z = sorted((calisma / aid).glob("PowerBI_*.zip"))[-1]
@@ -262,3 +264,51 @@ def test_tarih_adresi_faturalar_kendi_tarihini_ezmez(kirli, tmp_path, monkeypatc
     assert json.loads((calisma / aid / "tarih_filtresi.json").read_text()) == {"bas": "2026-01-01", "bit": "2026-02-01"}
     t = c.get(f"/faturalar/{aid}").get_data(as_text=True)
     assert 'value="2026-01-01"' in t and 'value="2026-02-01"' in t
+
+
+# ---------------------------------------------------------------------------- en çok satanlar
+@pytest.mark.parametrize("bas,bit", [("2026-10-01", "2026-10-31"), (None, None)])
+def test_en_cok_satanlar_sql_ile_ayni(temiz, bas, bit):
+    """Seçilen ayda en çok satılan ürün (tutara ve miktara göre) düz SQL ile aynı; kâr ABC'sinden bağımsız."""
+    con = sqlite3.connect(temiz)
+    k, p = "", []
+    if bas:
+        k += " AND s.tarih >= ?"; p.append(bas)
+    if bit:
+        k += " AND s.tarih < date(?, '+1 day')"; p.append(bit)
+    d = pd.read_sql_query(f"SELECT m.malzeme_kod, SUM(s.net_tutar) tutar, SUM(s.miktar) miktar FROM fact_satis s "
+                          f"JOIN dim_malzeme m USING (malzeme_ref) WHERE 1=1{k} GROUP BY 1", con, params=p)
+    a = Analiz(temiz, bas=bas, bit=bit)
+    t = a.en_cok_satanlar("tutar")
+    assert len(t) == len(d)
+    beklenen = d.sort_values(["tutar", "miktar", "malzeme_kod"], ascending=[False, False, True]).iloc[0]
+    assert t.iloc[0]["malzeme_kod"] == beklenen["malzeme_kod"]
+    assert t.iloc[0]["net_tutar"] == pytest.approx(beklenen["tutar"], abs=0.01)
+    assert t["net_tutar"].sum() == pytest.approx(a.ozet()["net_satis"], abs=0.01)
+    m = a.en_cok_satanlar("miktar")
+    assert m.iloc[0]["net_miktar"] == pytest.approx(d["miktar"].max(), abs=0.001)
+    assert list(t["sira"]) == list(range(1, len(t) + 1))
+    # kâr sırası, kâr ABC'sindeki sırayla aynı
+    kar = a.kar_abc("malzeme")
+    if kar is not None:
+        ilk_kar = kar.iloc[0]["malzeme_kod"]
+        assert int(t.loc[t["malzeme_kod"] == ilk_kar, "kar_sira"].iloc[0]) == 1
+
+
+def test_en_cok_satanlar_maliyetsiz_urunu_de_gosterir(temiz, tmp_path):
+    """Alışı başka firmada/dönemde kalan (maliyeti bilinmeyen) ürün kâr ABC'sinde yok ama en çok satanlarda var."""
+    yol = str(tmp_path / "analiz.sqlite")
+    shutil.copy(temiz, yol)
+    con = sqlite3.connect(yol)
+    en_cok = con.execute("SELECT malzeme_ref FROM fact_satis GROUP BY 1 ORDER BY SUM(net_tutar) DESC LIMIT 1").fetchone()[0]
+    con.execute("UPDATE fact_satis SET maliyet_tutar = NULL, birim_maliyet = NULL WHERE malzeme_ref = ?", (en_cok,))
+    con.commit()
+    con.close()
+    a = Analiz(yol)
+    assert a.en_cok_satanlar().iloc[0]["malzeme_kod"] == a.malzeme.set_index("malzeme_ref").loc[en_cok, "malzeme_kod"]
+    t = a.en_cok_satanlar()
+    kar = a.kar_abc("malzeme")
+    yok = set(t["malzeme_kod"]) - set(kar["malzeme_kod"])
+    assert yok, "kirli veride maliyeti bilinmeyen ürün olmalı"
+    assert t[t["malzeme_kod"].isin(yok)]["kar_sira"].isna().all()
+    assert t["net_tutar"].sum() == pytest.approx(a.ozet()["net_satis"], abs=0.01)

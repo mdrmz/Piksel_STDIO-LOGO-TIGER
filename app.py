@@ -577,8 +577,11 @@ def panel(aid):
         dusuk_marj = kar_urun[kar_urun["malzeme_kod"].isin(onemli)].sort_values("kar_marji").head(10)
     alacak = a.cari_yaslandirma("alacak")
     kayip, siparis = a.musteri_kaybi(), a.siparis_onerisi()
+    satan_sira = "miktar" if request.args.get("satan") == "miktar" else "tutar"
+    satan = a.en_cok_satanlar(satan_sira)
     return render_template(
-        "panel.html", aid=aid, bilgi=bilgi, o=a.ozet(), notlar=a.veri_notlari(),
+        "panel.html", satan=satan.head(10), satan_say=len(satan), satan_sira=satan_sira,
+        donem_etiketi=a.tarih_etiketi() or "tüm dönem", aid=aid, bilgi=bilgi, o=a.ozet(), notlar=a.veri_notlari(),
         one_cikanlar=a.one_cikanlar(olu_gun), kar_urun=None if kar_urun is None else kar_urun.head(10),
         kar_musteri=None if kar_musteri is None else kar_musteri.head(10), dusuk_marj=dusuk_marj,
         cari=a.cari_ozet(), alacak=None if alacak is None else alacak.head(15),
@@ -942,10 +945,44 @@ def abc_liste(aid, tur):
         t = a.kar_abc("malzeme" if tur == "urun" else "cari", esik)
     else:
         t = {"urun": a.urun_abc, "musteri": a.musteri_abc, "tedarikci": a.tedarikci_abc}[tur](esik=esik)
+    disarida = None
+    if olcut == "kar" and tur in ("urun", "musteri") and t is not None:
+        kod = "malzeme_kod" if tur == "urun" else "cari_kod"
+        tum = a.urun_abc(esik=esik) if tur == "urun" else a.musteri_abc(esik)
+        d = tum[~tum[kod].isin(set(t[kod]))]
+        disarida = {"adet": len(d), "tutar": float(d["net_tutar"].sum())} if len(d) else None
     return render_template("abc.html", aid=aid, bilgi=bilgi, tur=tur, t=t, esik=esik, olcut=olcut, kar_var=a.maliyet_var,
+                           kar_disi=disarida,
                            ozet=abc_ozet(t, "brut_kar" if olcut == "kar" else "net_tutar"),
                            ambar_secili=a.ambar_secili, ambar_secili_ad=a.ambar_secili_ad,
                            fatura_var=_fatura_var(a))
+
+
+# ---------------------------------------------------------------------------- en çok satanlar
+def _satan_sira():
+    return "miktar" if request.args.get("sira") == "miktar" else "tutar"
+
+
+@app.route("/satanlar/<aid>")
+def satanlar(aid):
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
+    sira = _satan_sira()
+    t = a.en_cok_satanlar(sira)
+    return render_template("satanlar.html", aid=aid, bilgi=bilgi, t=t, sira=sira, o=a.ozet(),
+                           donem=a.tarih_etiketi() or "tüm dönem", ambar_secili=a.ambar_secili,
+                           ambar_secili_ad=a.ambar_secili_ad, kar_var=a.maliyet_var,
+                           aq=f"&ambar={a.ambar_secili}" if a.ambar_secili is not None else "")
+
+
+@app.route("/satanlar/<aid>/excel")
+def satanlar_excel(aid):
+    from core.rapor import en_cok_satanlar_excel
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
+    sira = _satan_sira()
+    etiket = (a.tarih_etiketi() or "tum-donem").replace(".", "").replace(" – ", "_").replace(" ", "")
+    yol = os.path.join(klasor, f"En_Cok_Satanlar_{re.sub(r'[^0-9A-Za-z_-]', '', str(bilgi['firma']))}_{re.sub(r'[^0-9_-]', '', etiket) or 'tum'}.xlsx")
+    en_cok_satanlar_excel(a, yol, sira, f"{bilgi.get('firma')} {bilgi.get('firma_ad') or ''}".strip())
+    return send_file(yol, as_attachment=True)
 
 
 # ---------------------------------------------------------------------------- ürün kartı, cari kartı, ay detayı, arama
@@ -1367,7 +1404,7 @@ def guncelleme_uygula():
 
 
 # tarih filtresi çubuğunun göründüğü sayfalar
-_TARIHLI = {"panel", "abc_liste", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "satirlar_sayfa", "kontrol_sayfa", "karsi_cari"}
+_TARIHLI = {"panel", "abc_liste", "satanlar", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "satirlar_sayfa", "kontrol_sayfa", "karsi_cari"}
 
 
 @app.context_processor

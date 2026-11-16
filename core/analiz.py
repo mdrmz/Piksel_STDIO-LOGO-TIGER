@@ -224,6 +224,45 @@ class Analiz:
         return t[on + ["brut_kar", "kar_marji", "net_tutar", "maliyet"] + (["toplam_miktar"] if seviye == "malzeme" else [])
                  + ["pay", "kumulatif_pay", "ciro_sinif", "zarar"]]
 
+    def en_cok_satanlar(self, sira: str = "tutar") -> pd.DataFrame:
+        """Seçilen tarih aralığında (ve ambarda) en çok satılan ürünler. Kârdan bağımsızdır: maliyeti bilinmeyen
+        ürünler de listededir. sira: 'tutar' (net satış TL, iadeler düşülmüş) ya da 'miktar' (net satılan miktar).
+        Kolonlar: sira, malzeme_kod, malzeme_ad, grup_kod, net_tutar, net_miktar, satis_miktar, iade_miktar,
+        ort_fiyat, fatura_sayisi, musteri_sayisi, son_satis, pay, brut_kar, kar_marji, kar_sira, ciro_sinif."""
+        kolonlar = ["sira", "malzeme_kod", "malzeme_ad", "grup_kod", "net_tutar", "net_miktar", "satis_miktar",
+                    "iade_miktar", "ort_fiyat", "fatura_sayisi", "musteri_sayisi", "son_satis", "pay", "brut_kar",
+                    "kar_marji", "kar_sira", "ciro_sinif"]
+        s = self.satis
+        if s.empty:
+            return pd.DataFrame(columns=kolonlar)
+        sat, iad = s[~s["iade"]], s[s["iade"]]
+        t = s.groupby("malzeme_ref").agg(net_tutar=("net_tutar", "sum"), net_miktar=("miktar", "sum"))
+        t = t.join(sat.groupby("malzeme_ref").agg(satis_miktar=("miktar", "sum"), _satis_tutar=("net_tutar", "sum"),
+                                                  fatura_sayisi=("fatura_no", "nunique"), musteri_sayisi=("cari_ref", "nunique"),
+                                                  son_satis=("tarih", "max")))
+        t = t.join(iad.groupby("malzeme_ref")["miktar"].sum().abs().rename("iade_miktar"))
+        t = t.reset_index()
+        for c in ("satis_miktar", "_satis_tutar", "fatura_sayisi", "musteri_sayisi", "iade_miktar"):
+            t[c] = t[c].fillna(0)
+        t["ort_fiyat"] = np.where(t["satis_miktar"].abs() > 1e-9, t["_satis_tutar"] / t["satis_miktar"].where(t["satis_miktar"].abs() > 1e-9), np.nan)
+        toplam = t["net_tutar"].sum()
+        t["pay"] = t["net_tutar"] / toplam if toplam else np.nan
+        t["son_satis"] = pd.to_datetime(t["son_satis"]).dt.date
+        t = t.merge(self.malzeme[["malzeme_ref", "malzeme_kod", "malzeme_ad", "grup_kod"]], on="malzeme_ref", how="left")
+        # kâr (maliyeti biliniyorsa) ve kâr ABC'sindeki sırası: "en çok satan" ile "en çok kâr getiren" farkı görülsün
+        kar = self.kar_abc("malzeme")
+        if kar is not None and len(kar):
+            t = t.merge(kar[["malzeme_kod", "brut_kar", "kar_marji", "sira"]].rename(columns={"sira": "kar_sira"}),
+                        on="malzeme_kod", how="left")
+        else:
+            t["brut_kar"] = t["kar_marji"] = t["kar_sira"] = np.nan
+        ciro = self.urun_abc()[["malzeme_kod", "sinif"]].rename(columns={"sinif": "ciro_sinif"})
+        t = t.merge(ciro, on="malzeme_kod", how="left")
+        anahtar = ["net_miktar", "net_tutar"] if sira == "miktar" else ["net_tutar", "net_miktar"]
+        t = t.sort_values(anahtar + ["malzeme_kod"], ascending=[False, False, True], kind="mergesort").reset_index(drop=True)
+        t["sira"] = np.arange(1, len(t) + 1)
+        return t[kolonlar]
+
     # ------------------------------------------------------------------ ayrıntılı kırılımlar (Excel)
     def urun_cari(self, sinir: int | None = None):
         """Hangi ürün hangi firmaya ne kadar satıldı (ürün × cari), net tutara göre sıralı."""

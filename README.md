@@ -102,6 +102,7 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 | **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
 | **Karşılaştırma** | Dönem/yıl (bu yıl ↔ geçen yıl aynı dönem, tam yıllar, son 12 ay, elle): özet, aylık, ürün/cari/grup/ambar/temsilci; yeni–kaybedilen–artan–azalan, farkı kim oluşturdu, miktar ve fiyat etkisi. Cari karşılaştırma (2–4 müşteri, ürün fiyatlarıyla). Firma karşılaştırma (2–4 Logo firması, ortak müşteri ve ürünler). Hepsi Excel'e iner |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
+| **En çok satanlar** | Seçilen tarih aralığında (ör. sadece Ekim) en çok satılan ürünler, net satış tutarına ya da adede göre; kârdan bağımsız (maliyeti bilinmeyen ürünler de var), her ürünün kâr ABC'sindeki sırasıyla. Panelde ilk 10, tam liste ve Excel |
 | **Ürün ABC** | Kârlılığa göre (A = tahmini brüt kârın çoğunu getirenler) ya da net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
 | **Müşteri ABC** | Kârlılığa ya da net satışa göre; brüt kâr, marj, fatura sayısı, son alım tarihi |
 | **Tedarikçi ABC** | Net alış tutarına göre |
