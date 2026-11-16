@@ -1,5 +1,25 @@
 # Değişiklik günlüğü
 
+## v0.11.0 — 2026-11-16
+Karşılaştırmalar: dönem/yıl, cari ve firma. Panelde **Karşılaştır** düğmesi.
+- **Dönem / yıl karşılaştırma:** iki tarih aralığı yan yana. Hazır seçimler verinin kapsadığı tarihlere göre çıkar:
+  bu yıl başından bugüne ↔ geçen yılın aynı dönemi, tam yıllar, son 12 ay ↔ önceki 12 ay, son ay ↔ geçen yılın aynı
+  ayı; ya da iki aralık elle seçilir. Özet (net satış, iade, brüt kâr, marj, fatura, müşteri, ürün, alış) fark ve
+  % değişimle; aylık tablo ve grafik; ürün, cari, malzeme grubu, ambar ve temsilci kırılımı. Her kayıt **Yeni**,
+  **Kaybedildi**, **Arttı**, **Azaldı** olarak işaretlenir. **Farkı kim oluşturdu?** kutusu müşteri ve ürün
+  bazında net satış farkını yeni gelen + artan − azalan − kaybedilen olarak böler; ürünlerde fark ayrıca **miktar
+  etkisi** (daha çok/az adet) ve **fiyat etkisi** (birim fiyat değişimi) olarak ayrılır. Dönemlerin uzunluğu farklıysa
+  ya da dönemin bir kısmı yedekte yoksa uyarı verir. Yıl yıl ayrı açılmış Logo firmaları tek analizde birleştirilince
+  yıllar burada karşılaştırılır. Tamamı Excel'e iner (Özet, Aylık, Ürün, Cari, Grup, Ambar, Temsilci sayfaları).
+- **Cari karşılaştırma:** 2–4 cari yan yana: net satış, ciro payı, fatura, ortalama fatura, ürün çeşidi, iade,
+  brüt kâr, marj, ilk/son alım; aylık tablo ve grafik; her birinin en çok aldığı ürünler, ortalama birim fiyatları ve
+  aynı ürünü farklı carilerin kaçtan aldığı (fiyat farkı). Cari kartında **Başka carilerle karşılaştır** düğmesi.
+  Ekranın üstündeki tarih filtresi uygulanır. Excel.
+- **Firma karşılaştırma:** önceki analizlerden 2–4 Logo firması yan yana: özet göstergeler, aylık satış, en çok
+  satan ürünler, en büyük müşteriler, malzeme grupları, ambarlar, temsilciler; **ortak müşteriler** (ada göre;
+  "Ltd. Şti.", "A.Ş." ve Türkçe karakter farkları yok sayılır) ve **ortak ürünler** (koda göre, ortalama fiyatlarıyla).
+  Varsayılan olarak firmaların ortak tarih aralığı kullanılır. Ana sayfada **Firmaları karşılaştır**. Excel.
+
 ## v0.10.1 — 2026-11-16
 - **Linux/macOS (Docker): tarayıcıdan seçilen yedek açılamıyordu** ("Cannot open backup device … Operating system
   error 5 (Access is denied)"). Yüklenen dosya yalnızca sahibinin okuyabildiği izinle konteynerin klasörüne

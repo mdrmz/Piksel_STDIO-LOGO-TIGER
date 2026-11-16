@@ -1,0 +1,16 @@
+<style>
+  .ksekme { display:flex; gap:6px; margin:14px 0 4px; flex-wrap:wrap; } .ksekme a { padding:7px 14px; border-radius:8px; border:1px solid #CBD2DC; text-decoration:none; color:var(--yazi); font-size:14px; background:#fff; }
+  .ksekme a.aktif { background:var(--lacivert); color:#fff; border-color:var(--lacivert); }
+  td.art { color:#1E6B2F; } td.az { color:#B42318; } .durum-Yeni { background:#DCEBFF; color:#1F3864; } .durum-Kaybedildi { background:#F4CCCC; color:#8A1C1C; }
+  .durum-Arttı { background:var(--a); color:var(--a-y); } .durum-Azaldı { background:var(--b); color:var(--b-y); } .durum-Aynı { background:#EEE; color:#555; }
+  .kopru { display:flex; gap:0; flex-wrap:wrap; align-items:stretch; } .kopru > div { flex:1; min-width:120px; padding:8px 10px; border-left:1px solid #E5E8EE; }
+  .kopru > div:first-child { border-left:0; } .kopru .d { font-size:17px; font-weight:700; } .kopru .e { font-size:12px; color:var(--soluk); }
+  table.k td, table.k th, td.s, th.s { white-space:nowrap; } table.k td.ad { white-space:normal; min-width:180px; }
+  .cipler a { display:inline-block; padding:3px 10px; margin:0 4px 4px 0; border-radius:12px; font-size:12.5px; text-decoration:none; border:1px solid #CBD2DC; color:var(--yazi); }
+  .cipler a.aktif { background:var(--lacivert); color:#fff; border-color:var(--lacivert); }
+</style>
+<div class="ksekme">
+  {% if aid %}<a href="/karsilastir/{{ aid }}" class="{{ 'aktif' if sekme == 'donem' }}">Dönem / yıl karşılaştırma</a>
+  <a href="/karsilastir/{{ aid }}/cari" class="{{ 'aktif' if sekme == 'cari' }}">Cari karşılaştırma</a>{% endif %}
+  <a href="/karsilastir-firma{{ '?a=' ~ aid if aid and sekme != 'firma' else '' }}" class="{{ 'aktif' if sekme == 'firma' }}">Firma karşılaştırma</a>
+</div>

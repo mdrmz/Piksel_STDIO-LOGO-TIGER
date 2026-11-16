@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block baslik %}Karşılaştırma — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% macro deger(v, tur) %}{% if v is none %}–{% elif tur == 'oran' %}{{ v|yuzde }}{% elif tur == 'sayi' %}{{ v|tl }}{% else %}{{ v|tl }} ₺{% endif %}{% endmacro %}
+{% macro fark(v, tur) %}{% if v is none %}–{% elif tur == 'oran' %}{{ '+' if v > 0 }}{{ (v * 100)|tl(1) }} puan{% elif tur == 'sayi' %}{{ '+' if v > 0 }}{{ v|tl }}{% else %}{{ '+' if v > 0 }}{{ v|tl }} ₺{% endif %}{% endmacro %}
+{% macro yon(v) %}{{ 'art' if v and v > 0 else ('az' if v and v < 0 else '') }}{% endmacro %}
+{% block icerik %}
+{% set sekme = 'donem' %}
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div><h1>Karşılaştırma</h1><div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }}{% if ambar_secili is not none %} · {{ ambar_secili_ad }}{% endif %} · <a href="/panel/{{ aid }}">Panele dön</a></div></div>
+  {% if k %}<a class="btn" href="{{ excel_url }}">Excel'e indir</a>{% endif %}
+</div>
+{% include "_karsi_sekme.html" %}
+
+<form class="kart" method="get" style="margin-top:8px">
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+    {% if oner %}<div style="min-width:320px;flex:1"><label>Hazır karşılaştırma</label>
+      <select name="on" onchange="['a_bas','a_bit','b_bas','b_bit'].forEach(n => this.form[n].value=''); this.form.submit()">
+        {% for o in oner %}<option value="{{ o.kod }}" {{ 'selected' if on == o.kod }}>{{ o.ad }}</option>{% endfor %}
+        {% if not on %}<option value="" selected>Elle seçilen dönemler</option>{% endif %}
+      </select></div>{% endif %}
+    <div><label>Önceki dönem (A)</label><div style="display:flex;gap:4px"><input type="date" name="a_bas" value="{{ A[0] if A }}"><input type="date" name="a_bit" value="{{ A[1] if A }}"></div></div>
+    <div><label>Yeni dönem (B)</label><div style="display:flex;gap:4px"><input type="date" name="b_bas" value="{{ B[0] if B }}"><input type="date" name="b_bit" value="{{ B[1] if B }}"></div></div>
+    {% if ambarlar %}<div><label>Ambar</label><select name="ambar"><option value="">Tümü</option>
+      {% for x in ambarlar %}<option value="{{ x.no }}" {{ 'selected' if ambar_secili == x.no }}>{{ x.ad }}</option>{% endfor %}</select></div>{% endif %}
+    <button class="btn">Karşılaştır</button>
+  </div>
+  <p class="kucuk soluk" style="margin:8px 0 0">Yıl yıl ayrı açılmış Logo firmalarını karşılaştırmak için o yılların firmalarını tek analizde birlikte seçin; yıllar burada yan yana gelir.
+    Ekranın üstündeki tarih filtresi burada kullanılmaz; dönemleri bu kutudan seçin.</p>
+</form>
+
+{% if not k %}<p class="soluk">Bu analizde satış verisi yok.</p>{% else %}
+{% for u in k.uyari %}<div class="uyari" style="margin-top:12px">{{ u }}</div>{% endfor %}
+
+<div class="izgara i2" style="margin-top:16px">
+  <div class="kart">
+    <h3>Özet</h3>
+    <table>
+      <tr><th>Gösterge</th><th class="s">{{ k.ad_a }}</th><th class="s">{{ k.ad_b }}</th><th class="s">Fark</th><th class="s">Değişim</th></tr>
+      {% for r in k.ozet %}<tr><td>{{ r.ad }}</td><td class="s">{{ deger(r.a, r.tur) }}</td><td class="s"><b>{{ deger(r.b, r.tur) }}</b></td>
+        <td class="s {{ yon(r.fark if r.anahtar not in ('iade_tutar','iade_orani') else -(r.fark or 0)) }}">{{ fark(r.fark, r.tur) }}</td>
+        <td class="s {{ yon(r.oran if r.anahtar not in ('iade_tutar',) else -(r.oran or 0)) }}">{% if r.oran is not none %}{{ '+' if r.oran > 0 }}{{ r.oran|yuzde }}{% endif %}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="kart">
+    <h3>Farkı kim oluşturdu?</h3>
+    {% for sev, ad in (('cari', 'Müşteriler'), ('urun', 'Ürünler')) %}{% set p = k.kopru[sev] %}
+    <div class="kucuk soluk" style="margin:{{ '0' if loop.first else '14px' }} 0 4px"><b>{{ ad }}</b> — net satış {{ p.a|tl }} ₺ → {{ p.b|tl }} ₺ ({{ '+' if p.fark > 0 }}{{ p.fark|tl }} ₺)</div>
+    <div class="kopru">
+      <div><div class="e">Yeni gelen ({{ p.Yeni.adet }})</div><div class="d art"><a href="{{ url(sev=sev, durum='Yeni') }}#detay" style="color:#1E6B2F">+{{ p.Yeni.tutar|tl }}</a></div></div>
+      <div><div class="e">Artan ({{ p['Arttı'].adet }})</div><div class="d"><a href="{{ url(sev=sev, durum='Arttı') }}#detay" style="color:#1E6B2F">+{{ p['Arttı'].tutar|tl }}</a></div></div>
+      <div><div class="e">Azalan ({{ p['Azaldı'].adet }})</div><div class="d"><a href="{{ url(sev=sev, durum='Azaldı') }}#detay" style="color:#B42318">{{ p['Azaldı'].tutar|tl }}</a></div></div>
+      <div><div class="e">Kaybedilen ({{ p.Kaybedildi.adet }})</div><div class="d"><a href="{{ url(sev=sev, durum='Kaybedildi') }}#detay" style="color:#B42318">{{ p.Kaybedildi.tutar|tl }}</a></div></div>
+    </div>
+    {% if p.miktar_etkisi is defined %}<div class="kucuk" style="margin-top:6px">İki dönemde de satılan ürünlerde fark: <b>miktar etkisi {{ '+' if p.miktar_etkisi > 0 }}{{ p.miktar_etkisi|tl }} ₺</b>
+      (daha çok/az adet) · <b>fiyat etkisi {{ '+' if p.fiyat_etkisi > 0 }}{{ p.fiyat_etkisi|tl }} ₺</b> (birim fiyat değişimi)</div>{% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+<h2>Aylık</h2>
+{% if k.grafik %}<div class="kart"><img src="data:image/png;base64,{{ k.grafik }}" style="width:100%;height:auto" alt="Aylık karşılaştırma grafiği"></div>{% endif %}
+<div class="kart" style="padding:6px 12px;margin-top:10px;overflow-x:auto">
+<table>
+  <tr><th>Ay</th>{% for r in k.aylik.itertuples() %}<th class="s">{{ r.etiket }}</th>{% endfor %}<th class="s">Toplam</th></tr>
+  <tr><td>{{ k.ad_a }}</td>{% for r in k.aylik.itertuples() %}<td class="s">{{ r.a|tl if r.a is not none else '' }}</td>{% endfor %}<td class="s"><b>{{ k.oa.net_satis|tl }}</b></td></tr>
+  <tr><td>{{ k.ad_b }}</td>{% for r in k.aylik.itertuples() %}<td class="s">{{ r.b|tl if r.b is not none else '' }}</td>{% endfor %}<td class="s"><b>{{ k.ob.net_satis|tl }}</b></td></tr>
+  <tr><td>Değişim</td>{% for r in k.aylik.itertuples() %}<td class="s {{ yon(r.oran) }}">{% if r.oran is not none and r.oran == r.oran %}{{ '+' if r.oran > 0 }}{{ r.oran|yuzde }}{% endif %}</td>{% endfor %}
+    <td class="s {{ yon(k.ob.net_satis - k.oa.net_satis) }}">{% if k.oa.net_satis %}{{ '+' if k.ob.net_satis > k.oa.net_satis }}{{ (k.ob.net_satis / k.oa.net_satis - 1)|yuzde }}{% endif %}</td></tr>
+</table></div>
+
+<h2 id="detay">Ayrıntı</h2>
+<div class="cipler">{% for s_, ad in sev_ad.items() %}<a href="{{ url(sev=s_, durum=None, n=None) }}#detay" class="{{ 'aktif' if sev == s_ }}">{{ ad }}</a>{% endfor %}</div>
+<div class="cipler"><a href="{{ url(durum=None, n=None) }}#detay" class="{{ 'aktif' if not durum }}">Hepsi</a>
+  {% for d in durumlar %}{% if durum_say.get(d) %}<a href="{{ url(durum=d, n=None) }}#detay" class="{{ 'aktif' if durum == d }}">{{ d }} ({{ durum_say[d] }})</a>{% endif %}{% endfor %}</div>
+<div class="kart" style="padding:6px 10px;overflow-x:auto">
+<table class="k">
+  <tr><th>{{ sev_ad[sev] }}</th><th class="s">{{ k.ad_a }}</th><th class="s">{{ k.ad_b }}</th><th class="s">Fark</th><th class="s">Değişim</th><th>Durum</th>
+    {% if sev == 'urun' %}<th class="s">Miktar A → B</th><th class="s">Ort. fiyat A → B</th><th class="s" title="Adet değişiminin tutara etkisi">Miktar etkisi</th><th class="s" title="Birim fiyat değişiminin tutara etkisi">Fiyat etkisi</th>{% endif %}
+    {% if k.kar_var %}<th class="s">Marj A → B</th>{% endif %}<th class="s">Fatura A → B</th></tr>
+  {% for r in tablo.itertuples() %}
+  <tr>
+    <td class="ad">{% if sev == 'urun' %}<a href="/urun/{{ aid }}?kod={{ r.kod|urlencode }}">{{ r.ad }}</a>{% elif sev == 'cari' %}<a href="/cari/{{ aid }}?kod={{ r.kod|urlencode }}">{{ r.ad }}</a>{% else %}{{ r.ad }}{% endif %}
+      {% if sev in ('urun','cari') %}<div class="kucuk soluk">{{ r.kod }}{% if r.ek %} · {{ r.ek }}{% endif %}</div>{% endif %}</td>
+    <td class="s">{{ r.a|tl }}</td><td class="s"><b>{{ r.b|tl }}</b></td>
+    <td class="s {{ yon(r.fark) }}">{{ '+' if r.fark > 0 }}{{ r.fark|tl }}</td>
+    <td class="s {{ yon(r.oran) }}">{% if r.oran == r.oran %}{{ '+' if r.oran > 0 }}{{ r.oran|yuzde }}{% endif %}</td>
+    <td><span class="rozet durum-{{ r.durum }}">{{ r.durum }}</span></td>
+    {% if sev == 'urun' %}<td class="s">{{ r.a_miktar|tl }} → {{ r.b_miktar|tl }}</td><td class="s">{{ r.a_fiyat|tl(2) or '–' }} → {{ r.b_fiyat|tl(2) or '–' }}</td>
+      <td class="s {{ yon(r.miktar_etkisi) }}">{{ r.miktar_etkisi|tl }}</td><td class="s {{ yon(r.fiyat_etkisi) }}">{{ r.fiyat_etkisi|tl }}</td>{% endif %}
+    {% if k.kar_var %}<td class="s">{{ r.a_marj|yuzde or '–' }} → {{ r.b_marj|yuzde or '–' }}</td>{% endif %}
+    <td class="s">{{ r.a_fatura|tl }} → {{ r.b_fatura|tl }}</td>
+  </tr>{% else %}<tr><td colspan="12" class="soluk">Kayıt yok.</td></tr>{% endfor %}
+</table></div>
+<p class="kucuk soluk">{{ tablo_say|tl }} kayıt, farkın büyüklüğüne göre sıralı.{% if tablo_say > tablo|length %} İlk {{ tablo|length }} gösteriliyor · <a href="{{ url(n='tumu') }}#detay">tümünü göster</a> · tamamı Excel'de.{% endif %}
+  Fark = B − A. Ürünlerde fark = miktar etkisi + fiyat etkisi (iki dönemde de satılanlarda).</p>
+{% endif %}
+{% endblock %}

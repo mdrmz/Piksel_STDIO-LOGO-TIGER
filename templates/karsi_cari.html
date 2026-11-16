@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block baslik %}Cari karşılaştırma — {{ bilgi.firma }} {{ bilgi.firma_ad }}{% endblock %}
+{% block icerik %}
+{% set sekme = 'cari' %}
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div><h1>Cari karşılaştırma</h1><div class="soluk">{{ bilgi.firma }} · {{ bilgi.firma_ad }} · <a href="/panel/{{ aid }}">Panele dön</a></div></div>
+  {% if k and k.secili %}<a class="btn" href="{{ excel_url }}">Excel'e indir</a>{% endif %}
+</div>
+{% include "_karsi_sekme.html" %}
+
+<form class="kart" method="get" style="margin-top:8px">
+  <label>Karşılaştırılacak cariler (2–4): kod ya da ad yazıp listeden seçin</label>
+  <div class="izgara i4" style="gap:8px">
+    {% for i in range(4) %}<input type="text" name="c" list="cariler" value="{{ kodlar[i] if i < kodlar|length else '' }}" placeholder="{{ i + 1 }}. cari kodu">{% endfor %}
+  </div>
+  <datalist id="cariler">{% for r in liste.itertuples() %}<option value="{{ r.cari_kod }}">{{ r.cari_ad }}</option>{% endfor %}</datalist>
+  {% if ambar_secili is not none %}<input type="hidden" name="ambar" value="{{ ambar_secili }}">{% endif %}
+  <div style="display:flex;gap:8px;margin-top:10px;align-items:center"><button class="btn">Karşılaştır</button>
+    <span class="kucuk soluk">Tarih aralığı sayfanın üstündeki filtreden gelir. Liste ciroya göre sıralı.</span></div>
+</form>
+
+{% if k %}
+{% if kodlar|length > k.secili|length %}<div class="uyari" style="margin-top:12px">Bazı kodlar bulunamadı; listeden seçtiğinizden emin olun.</div>{% endif %}
+{% if k.secili %}
+<div class="kart" style="margin-top:16px;overflow-x:auto">
+  <table>
+    <tr><th></th>{% for x in k.ozet %}<th class="s" style="min-width:150px"><a href="/cari/{{ aid }}?kod={{ x.kod|urlencode }}">{{ x.ad }}</a><div class="kucuk soluk">{{ x.kod }}{% if x.sehir %} · {{ x.sehir }}{% endif %}</div></th>{% endfor %}</tr>
+    <tr><td>Net satış</td>{% for x in k.ozet %}<td class="s"><b>{{ x.net_satis|tl }} ₺</b></td>{% endfor %}</tr>
+    <tr><td>Toplam ciro içindeki payı</td>{% for x in k.ozet %}<td class="s">{{ x.pay|yuzde }}</td>{% endfor %}</tr>
+    <tr><td>Fatura sayısı</td>{% for x in k.ozet %}<td class="s">{{ x.fatura|tl }}</td>{% endfor %}</tr>
+    <tr><td>Ortalama fatura</td>{% for x in k.ozet %}<td class="s">{{ x.ort_fatura|tl }} ₺</td>{% endfor %}</tr>
+    <tr><td>Aldığı ürün çeşidi</td>{% for x in k.ozet %}<td class="s">{{ x.urun_cesidi|tl }}</td>{% endfor %}</tr>
+    <tr><td>İade</td>{% for x in k.ozet %}<td class="s">{{ x.iade|tl }} ₺</td>{% endfor %}</tr>
+    {% if k.kar_var %}<tr><td>Tahmini brüt kâr</td>{% for x in k.ozet %}<td class="s">{{ x.brut_kar|tl if x.brut_kar is not none else '–' }} ₺</td>{% endfor %}</tr>
+    <tr><td>Brüt kâr marjı</td>{% for x in k.ozet %}<td class="s">{{ x.marj|yuzde if x.marj is not none else '–' }}</td>{% endfor %}</tr>{% endif %}
+    <tr><td>İlk / son alım</td>{% for x in k.ozet %}<td class="s">{% if x.ilk == x.ilk and x.ilk %}{{ x.ilk.strftime('%d.%m.%Y') }} / {{ x.son.strftime('%d.%m.%Y') }}{% else %}–{% endif %}</td>{% endfor %}</tr>
+  </table>
+</div>
+
+<h2>Aylık</h2>
+{% if k.grafik %}<div class="kart"><img src="data:image/png;base64,{{ k.grafik }}" style="width:100%;height:auto" alt="Carilerin aylık alımı"></div>{% endif %}
+<div class="kart" style="padding:6px 12px;margin-top:10px;overflow-x:auto"><table>
+  <tr><th>Ay</th>{% for x in k.secili %}<th class="s">{{ x.ad }}</th>{% endfor %}</tr>
+  {% for r in k.aylik.to_dict('records') %}<tr><td>{{ r.ay }}</td>{% for x in k.secili %}<td class="s">{{ r[x.kod]|tl }}</td>{% endfor %}</tr>{% endfor %}
+</table></div>
+
+<h2>Ürünler ve fiyatlar</h2>
+<p class="kucuk soluk">Her carinin en çok aldığı ürünler. Hücrede tutar, altında ortalama birim fiyat (KDV hariç). Birden fazla carinin aldığı üründe fiyatlar arasındaki fark sağda.</p>
+<div class="kart" style="padding:6px 10px;overflow-x:auto"><table class="k">
+  <tr><th>Ürün</th>{% for x in k.secili %}<th class="s">{{ x.ad }}</th>{% endfor %}<th class="s" title="En yüksek ortalama fiyat / en düşük − 1">Fiyat farkı</th></tr>
+  {% for u in k.urunler %}<tr><td class="ad"><a href="/urun/{{ aid }}?kod={{ u.kod|urlencode }}">{{ u.ad }}</a><div class="kucuk soluk">{{ u.kod }}</div></td>
+    {% for x in k.secili %}{% set d = u[x.kod] %}<td class="s">{% if d.tutar %}{{ d.tutar|tl }}<div class="kucuk soluk">{{ d.miktar|tl }} × {{ d.fiyat|tl(2) }}</div>{% else %}<span class="soluk">–</span>{% endif %}</td>{% endfor %}
+    <td class="s">{% if u.fiyat_farki is not none %}<b style="color:{{ '#B42318' if u.fiyat_farki > 0.1 else 'inherit' }}">{{ u.fiyat_farki|yuzde }}</b>{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% else %}<p class="soluk" style="margin-top:16px">Karşılaştırmak için en az bir cari seçin. Cari kartından da gelebilirsiniz.</p>{% endif %}
+{% endblock %}
