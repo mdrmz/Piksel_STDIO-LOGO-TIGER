@@ -12,6 +12,7 @@
     <div class="soluk">{{ k.c.cari_kod }}{% if k.c.sehir %} · {{ k.c.sehir }}{% endif %} · cari kartı</div></div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     {% if fatura_var %}<a class="btn ikincil" href="/faturalar/{{ aid }}?cari_kod={{ kod|urlencode }}">Faturaları</a>{% endif %}
+    <a class="btn ikincil" href="/karsilastir/{{ aid }}/cari?c={{ kod|urlencode }}" title="Bu cariyi başka carilerle yan yana koyun">Başka carilerle karşılaştır</a>
     {% if haric_ok %}<form method="post" action="/haric/{{ aid }}/{{ 'cikar' if k.haric else 'ekle' }}"
         onsubmit="return confirm('{{ 'Bu cari yeniden hesaplamalara dahil edilsin mi?' if k.haric else 'Bu carinin tüm satış ve alışları ciro, kâr, ABC ve raporlardan çıkarılsın mı? İstediğiniz zaman geri alabilirsiniz.' }}')">
       <input type="hidden" name="tur" value="cari"><input type="hidden" name="anahtar" value="{{ kod }}"><input type="hidden" name="donus" value="{{ temel }}">

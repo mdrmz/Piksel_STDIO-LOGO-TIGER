@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block baslik %}Firma karşılaştırma — Logo Tiger Analiz{% endblock %}
+{% macro deger(v, tur) %}{% if v is none %}–{% elif tur == 'oran' %}{{ v|yuzde }}{% elif tur == 'sayi' %}{{ v|tl }}{% else %}{{ v|tl }} ₺{% endif %}{% endmacro %}
+{% block icerik %}
+{% set sekme = 'firma' %}{% set aid = None %}
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div><h1>Firma karşılaştırma</h1><div class="soluk">Farklı Logo firmalarının analizleri yan yana · <a href="/">Analizler</a></div></div>
+  {% if k %}<a class="btn" href="{{ excel_url }}">Excel'e indir</a>{% endif %}
+</div>
+{% include "_karsi_sekme.html" %}
+
+<form class="kart" method="get" style="margin-top:8px">
+  <label>Karşılaştırılacak analizler (2–4)</label>
+  {% if analizler|length < 2 %}<p class="soluk">En az iki analiz gerekiyor. Başka bir firmayı da analiz edin (yedek açılırken "Sonra başka firmayı da analiz edeceğim" kutusu yedeğin yeniden açılmasını önler).</p>{% endif %}
+  <div style="max-height:260px;overflow:auto;border:1px solid #E5E8EE;border-radius:6px;padding:4px 10px">
+    {% for x in analizler %}<label style="display:flex;gap:8px;align-items:center;margin:4px 0;color:var(--yazi);font-size:14px">
+      <input type="checkbox" name="a" value="{{ x.id }}" {{ 'checked' if x.id in secili }}> <b>{{ x.firma }}</b> {{ x.firma_ad }}
+      <span class="kucuk soluk">· {{ x.tarih_bas }} – {{ x.tarih_bit }} · {{ x.olusturma }}</span></label>{% endfor %}
+  </div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
+    <div><label>Başlangıç</label><input type="date" name="bas" value="{{ aralik[0] if aralik and aralik[0] and not tum }}"></div>
+    <div><label>Bitiş</label><input type="date" name="bit" value="{{ aralik[1] if aralik and aralik[1] and not tum }}"></div>
+    <label style="display:flex;gap:6px;align-items:center;color:var(--yazi);font-size:14px;margin:0 0 8px"><input type="checkbox" name="tum" value="1" {{ 'checked' if tum }}> Her firmanın tüm verisi (tarih eşitlenmez)</label>
+    <button class="btn">Karşılaştır</button>
+  </div>
+  <p class="kucuk soluk" style="margin:8px 0 0">Tarih boş bırakılırsa firmaların <b>ortak dönemi</b> kullanılır{% if ortak and ortak[0] %} ({{ ortak[0] }} – {{ ortak[1] }}){% endif %}; böylece aynı aylar kıyaslanır.
+    Aynı şirketin yıllarını karşılaştırmak için Dönem karşılaştırmayı kullanın.</p>
+</form>
+
+{% if k %}
+{% set ff = k.firmalar %}
+{% if not tum and not (aralik[0] or aralik[1]) %}<div class="uyari" style="margin-top:12px">Firmaların ortak bir tarih aralığı yok; her firmanın tüm verisi kullanıldı.</div>{% endif %}
+<div class="kart" style="margin-top:16px;overflow-x:auto"><table>
+  <tr><th>Gösterge</th>{% for f in ff %}<th class="s" style="min-width:150px"><a href="/panel/{{ f.aid }}">{{ f.ad }}</a></th>{% endfor %}</tr>
+  {% for r in k.ozet %}<tr><td>{{ r.ad }}</td>{% for v in r.degerler %}<td class="s">{{ deger(v, r.tur) }}</td>{% endfor %}</tr>{% endfor %}
+</table></div>
+
+<h2>Aylık net satış</h2>
+{% if k.grafik %}<div class="kart"><img src="data:image/png;base64,{{ k.grafik }}" style="width:100%;height:auto" alt="Firmaların aylık satışı"></div>{% endif %}
+<div class="kart" style="padding:6px 12px;margin-top:10px;overflow-x:auto"><table>
+  <tr><th>Ay</th>{% for f in ff %}<th class="s">{{ f.kisa }}</th>{% endfor %}</tr>
+  {% for r in k.aylik.to_dict('records') %}<tr><td>{{ r.ay }}</td>{% for f in ff %}<td class="s">{{ r[f.aid]|tl }}</td>{% endfor %}</tr>{% endfor %}
+</table></div>
+
+{% for sev, baslik in (('urun', 'En çok satan ürünler'), ('cari', 'En büyük müşteriler'), ('grup', 'Malzeme grupları'), ('ambar', 'Ambarlar'), ('temsilci', 'Satış temsilcileri')) %}
+<h2>{{ baslik }}</h2>
+<div class="izgara i{{ [ff|length, 4]|min }}">
+  {% for f in ff %}{% set liste = k.listeler[sev][loop.index0] %}
+  <div class="kart" style="padding:8px 10px"><div class="kucuk"><b>{{ f.kisa }}</b></div>
+    <table class="kucuk">{% for r in liste %}<tr><td>{{ loop.index }}. {{ r.ad }}</td><td class="s">{{ r.tutar|tl }}</td><td class="s soluk">{{ r.pay|yuzde }}</td></tr>
+      {% else %}<tr><td class="soluk">Veri yok</td></tr>{% endfor %}</table></div>
+  {% endfor %}
+</div>
+{% endfor %}
+
+{% for anahtar, baslik, aciklama in (('ortak_cari', 'Ortak müşteriler', 'Birden fazla firmadan alan müşteriler (ada göre eşleştirilir: "Ltd. Şti.", "A.Ş." ve Türkçe karakter farkları yok sayılır).'), ('ortak_urun', 'Ortak ürünler', 'Birden fazla firmanın sattığı ürünler (malzeme koduna göre). Altta ortalama birim fiyat.')) %}
+<h2>{{ baslik }} <span class="soluk kucuk">({{ k[anahtar]|length }})</span></h2>
+<p class="kucuk soluk">{{ aciklama }}</p>
+{% if k[anahtar] %}<div class="kart" style="padding:6px 10px;overflow-x:auto"><table class="k">
+  <tr><th>{{ 'Müşteri' if anahtar == 'ortak_cari' else 'Ürün' }}</th>{% for f in ff %}<th class="s">{{ f.kisa }}</th>{% endfor %}</tr>
+  {% for r in k[anahtar][:50] %}<tr><td class="ad">{{ r.ad }}</td>{% for d in r.degerler %}<td class="s">{% if d %}{{ d.tutar|tl }}{% if anahtar == 'ortak_urun' and d.fiyat %}<div class="kucuk soluk">{{ d.fiyat|tl(2) }} ₺/birim</div>{% endif %}{% else %}<span class="soluk">–</span>{% endif %}</td>{% endfor %}</tr>{% endfor %}
+</table></div>{% if k[anahtar]|length > 50 %}<p class="kucuk soluk">İlk 50 gösteriliyor; tamamı Excel'de.</p>{% endif %}
+{% else %}<p class="soluk">Ortak kayıt yok.</p>{% endif %}
+{% endfor %}
+{% elif secili|length == 1 %}<p class="soluk" style="margin-top:16px">Bir analiz daha seçin.</p>{% endif %}
+{% endblock %}

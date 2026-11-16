@@ -100,6 +100,7 @@ geri yükleyip analiz eder ve sonuçlar kuruşu kuruşuna karşılaştırılır 
 | **Veri kontrolü** | Logo'nun fatura toplamıyla farklı çıkan faturalar ve otomatik bulunan nedeni (masraf satırı, iptal satırı, tevkifat, dağıtılmamış indirim…), Logo ile sağlama köprüsü, boş/eksik veriler (carisi seçilmemiş satış, kartı olmayan cari/malzeme, maliyeti bulunamayan satış…) ve Excel çıktısı |
 | **Fatura satırları** | "Rakamlar nereden geliyor": tüm faturaların tüm satırları; Logo ham alanları (`TOTAL`, `DISTDISC`, `VATMATRAH`), hesaba giren tutar ve girmeyenlerin nedeni; satış − iade = net satış hesabı; Excel |
 | **Faturalar** | Tüm faturalar tek tek: tarih, tür, cari, ürün, ambar, fatura no filtreleri; fatura detayı ve satırları; Logo başlık toplamıyla karşılaştırma; her kayıt için Logo tablo adı + `LOGICALREF` |
+| **Karşılaştırma** | Dönem/yıl (bu yıl ↔ geçen yıl aynı dönem, tam yıllar, son 12 ay, elle): özet, aylık, ürün/cari/grup/ambar/temsilci; yeni–kaybedilen–artan–azalan, farkı kim oluşturdu, miktar ve fiyat etkisi. Cari karşılaştırma (2–4 müşteri, ürün fiyatlarıyla). Firma karşılaştırma (2–4 Logo firması, ortak müşteri ve ürünler). Hepsi Excel'e iner |
 | **Özet** | Net satış, iade tutarı ve oranı, fatura sayısı, ortalama fatura, müşteri/ürün sayısı, net alış |
 | **Ürün ABC** | Kârlılığa göre (A = tahmini brüt kârın çoğunu getirenler) ya da net satış tutarına göre A/B/C sınıfları, Pareto grafiği. Sınırlar ayarlanabilir (varsayılan %80 / %95) |
 | **Müşteri ABC** | Kârlılığa ya da net satışa göre; brüt kâr, marj, fatura sayısı, son alım tarihi |
@@ -260,6 +261,7 @@ core/analiz.py         ABC, trend, ölü stok, stok devir, kârlılık, cari ya�
 core/rapor.py          Excel raporu ve Power BI paketi
 core/fatura.py         fatura listesi, filtreler, fatura detayı, Logo ile sağlama
 core/detay.py          ürün kartı, cari kartı, ay detayı, otomatik bulgular
+core/karsilastir.py    dönem/yıl, cari ve firma karşılaştırması
 core/haric.py          cari ve faturaları hesaplama dışı bırakma
 core/pdf_ozet.py       tek sayfalık PDF yönetici özeti
 core/powerbi.py        hazır Power BI raporu (.pbit): model, ölçüler ve rapor sayfaları

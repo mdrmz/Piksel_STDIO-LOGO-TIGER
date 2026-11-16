@@ -705,6 +705,140 @@ def faturalar_excel(aid):
     return send_file(yol, as_attachment=True)
 
 
+# ---------------------------------------------------------------------------- karşılaştırmalar
+def _karsi_donemler(a, args):
+    """Seçilen hazır karşılaştırma (on=…) ya da elle girilen iki aralık. Döner: (öneriler, seçili kod, A, B)."""
+    from core import karsilastir as K
+    oner = K.oneriler(a)
+    elle = [_tarih_gecerli(args.get(k)) for k in ("a_bas", "a_bit", "b_bas", "b_bit")]
+    if all(elle):
+        return oner, None, (elle[0], elle[1]), (elle[2], elle[3])
+    sec = next((o for o in oner if o["kod"] == args.get("on")), oner[0] if oner else None)
+    if sec:
+        return oner, sec["kod"], sec["A"], sec["B"]
+    t = a.satis["tarih"].dropna()
+    if t.empty:
+        return oner, None, None, None
+    son = t.max()
+    return oner, None, (f"{son.year - 1}-01-01", f"{son.year - 1}-12-31"), (f"{son.year}-01-01", str(son.date()))
+
+
+KARSI_SEV = ("urun", "cari", "grup", "ambar", "temsilci")
+
+
+@app.route("/karsilastir/<aid>")
+def karsilastir_sayfa(aid):
+    from core import karsilastir as K
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param(), tarihli=False)
+    oner, on, A, B = _karsi_donemler(a, request.args)
+    if A is None:
+        return render_template("karsilastir.html", aid=aid, bilgi=bilgi, k=None, oner=oner)
+    k = K.donem(a, A, B)
+    sev = request.args.get("sev") if request.args.get("sev") in KARSI_SEV else "urun"
+    durum = request.args.get("durum") if request.args.get("durum") in K.DURUMLAR else ""
+    t = k["kirilim"][sev]
+    if durum:
+        t = t[t["durum"] == durum]
+    n = 50 if request.args.get("n") != "tumu" else len(t)
+    args = request.args.to_dict(flat=True)
+
+    def url(yol=f"/karsilastir/{aid}", **degis):
+        from urllib.parse import urlencode
+        q = {kk: v for kk, v in {**args, **degis}.items() if v not in (None, "")}
+        return yol + ("?" + urlencode(q) if q else "")
+    return render_template("karsilastir.html", aid=aid, bilgi=bilgi, k=k, oner=oner, on=on, A=A, B=B, sev=sev,
+                           sev_ad={s_: K.SEVIYELER[s_][0] for s_ in KARSI_SEV}, durum=durum, durumlar=K.DURUMLAR,
+                           tablo=t.head(n), tablo_say=len(t), url=url, ambarlar=a.ambarlar if len(a.ambarlar) > 1 else [],
+                           ambar_secili=a.ambar_secili, ambar_secili_ad=a.ambar_secili_ad,
+                           durum_say=k["kirilim"][sev]["durum"].value_counts().to_dict(),
+                           excel_url=url(f"/karsilastir/{aid}/excel"))
+
+
+@app.route("/karsilastir/<aid>/excel")
+def karsilastir_excel(aid):
+    from core import karsilastir as K
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param(), tarihli=False)
+    _, _, A, B = _karsi_donemler(a, request.args)
+    if A is None:
+        abort(404)
+    k = K.donem(a, A, B)
+    ad = re.sub(r"[^0-9A-Za-z-]", "", f"{k['ad_a']}_{k['ad_b']}") or "donem"
+    yol = os.path.join(klasor, f"Karsilastirma_{ad}.xlsx")
+    baslik = f"{bilgi.get('firma', '')} {bilgi.get('firma_ad', '')}" + (f" — {a.ambar_secili_ad}" if a.ambar_secili is not None else "")
+    K.donem_excel(k, yol, baslik)
+    return send_file(yol, as_attachment=True)
+
+
+def _karsi_cari_verisi(aid):
+    from core import karsilastir as K
+    klasor, bilgi, a = _analiz_ac(aid, _ambar_param())
+    kodlar = [k_.strip() for k_ in request.args.getlist("c") if k_.strip()][:4]
+    return klasor, bilgi, a, kodlar, (K.cari(a, kodlar) if kodlar else None)
+
+
+@app.route("/karsilastir/<aid>/cari")
+def karsi_cari(aid):
+    klasor, bilgi, a, kodlar, k = _karsi_cari_verisi(aid)
+    liste = a.musteri_abc().head(5000)[["cari_kod", "cari_ad"]]
+    from urllib.parse import urlencode
+    q = urlencode([("c", c_) for c_ in kodlar] + ([("ambar", a.ambar_secili)] if a.ambar_secili is not None else []))
+    return render_template("karsi_cari.html", aid=aid, bilgi=bilgi, k=k, kodlar=kodlar, liste=liste,
+                           excel_url=f"/karsilastir/{aid}/cari/excel?{q}", ambar_secili=a.ambar_secili)
+
+
+@app.route("/karsilastir/<aid>/cari/excel")
+def karsi_cari_excel(aid):
+    from core import karsilastir as K
+    klasor, bilgi, a, kodlar, k = _karsi_cari_verisi(aid)
+    if not k or not k["secili"]:
+        abort(404)
+    yol = os.path.join(klasor, "Cari_karsilastirma.xlsx")
+    K.cari_excel(k, yol, f"{bilgi.get('firma', '')} {bilgi.get('firma_ad', '')} — " + (a.tarih_etiketi() or "tüm dönem"))
+    return send_file(yol, as_attachment=True)
+
+
+def _karsi_firma_verisi():
+    from core import karsilastir as K
+    aids = list(dict.fromkeys(x for x in request.args.getlist("a") if x))[:4]
+    secili = []
+    for aid in aids:
+        klasor = _analiz_klasor(aid)
+        with open(os.path.join(klasor, "bilgi.json"), encoding="utf-8") as fh:
+            secili.append((aid, json.load(fh), klasor))
+    if len(secili) < 2:
+        return secili, None, None, None, False
+    tum = request.args.get("tum") == "1"
+    bas, bit = _tarih_gecerli(request.args.get("bas")), _tarih_gecerli(request.args.get("bit"))
+    ortak = K.ortak_aralik([b for _, b, _ in secili])
+    if tum:
+        bas, bit = None, None
+    elif not (bas or bit):
+        bas, bit = ortak
+    analizler = [(aid, b, Analiz(os.path.join(kl, "analiz.sqlite"), bas=bas, bit=bit)) for aid, b, kl in secili]
+    return secili, K.firma(analizler), (bas, bit), ortak, tum
+
+
+@app.route("/karsilastir-firma")
+def karsi_firma():
+    secili, k, aralik, ortak, tum = _karsi_firma_verisi()
+    from urllib.parse import urlencode
+    return render_template("karsi_firma.html", analizler=_analizler(), secili=[s_[0] for s_ in secili], k=k,
+                           aralik=aralik, ortak=ortak, tum=tum,
+                           excel_url="/karsilastir-firma/excel?" + urlencode(list(request.args.items(multi=True))))
+
+
+@app.route("/karsilastir-firma/excel")
+def karsi_firma_excel():
+    from core import karsilastir as K
+    secili, k, aralik, _, _ = _karsi_firma_verisi()
+    if not k:
+        abort(404)
+    yol = os.path.join(CALISMA, "Firma_karsilastirma.xlsx")
+    et = "tüm veri" if not any(aralik) else f"{aralik[0] or '…'} – {aralik[1] or '…'}"
+    K.firma_excel(k, yol, "Firma karşılaştırma — " + et)
+    return send_file(yol, as_attachment=True)
+
+
 SATIR_SAYFA_BOYU = 200
 
 
@@ -1233,7 +1367,7 @@ def guncelleme_uygula():
 
 
 # tarih filtresi çubuğunun göründüğü sayfalar
-_TARIHLI = {"panel", "abc_liste", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "satirlar_sayfa", "kontrol_sayfa"}
+_TARIHLI = {"panel", "abc_liste", "urun_karti", "cari_karti", "ay_sayfa", "ara_sayfa", "faturalar_sayfa", "satirlar_sayfa", "kontrol_sayfa", "karsi_cari"}
 
 
 @app.context_processor

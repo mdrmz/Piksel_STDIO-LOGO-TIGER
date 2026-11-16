@@ -105,7 +105,8 @@
   {% endif %}
 </div>
 
-<h2>Önceki analizler</h2>
+<h2 style="display:flex;justify-content:space-between;align-items:baseline">Önceki analizler
+  {% if analizler|length > 1 %}<a class="btn ikincil kucuk" href="/karsilastir-firma" style="font-size:13px">Firmaları karşılaştır</a>{% endif %}</h2>
 {% if analizler %}
 <div class="kart" style="padding:6px 12px">
 <table>
